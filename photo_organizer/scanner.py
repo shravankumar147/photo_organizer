@@ -1,5 +1,5 @@
 """
-scanner.py — file discovery layer.
+scanner.py — media file discovery layer.
 
 Responsibilities:
   * Walk the source tree (generator — zero memory overhead)
@@ -19,13 +19,28 @@ from typing import Generator
 
 log = logging.getLogger(__name__)
 
+MEDIA_EXTENSIONS: dict[str, frozenset[str]] = {
+    "images": frozenset({"jpg", "jpeg", "png", "heic"}),
+    "raw": frozenset({"cr3", "raw"}),
+    "videos": frozenset({"mp4", "mov"}),
+}
+
 # Default supported extensions (lowercase, no leading dot)
-DEFAULT_EXTENSIONS: frozenset[str] = frozenset({"jpg", "jpeg", "png", "heic"})
+DEFAULT_EXTENSIONS: frozenset[str] = frozenset().union(*MEDIA_EXTENSIONS.values())
+
+
+def media_bucket_for_path(path: Path) -> str | None:
+    """Return the destination bucket for a file path, or None if unsupported."""
+    suffix = path.suffix.lstrip(".").lower()
+    for bucket, extensions in MEDIA_EXTENSIONS.items():
+        if suffix in extensions:
+            return bucket
+    return None
 
 
 class Scanner:
     """
-    Recursively discovers image files under a root directory.
+    Recursively discovers supported media files under a root directory.
 
     Uses a generator to avoid loading the entire file list into memory —
     important when scanning large SD cards or network volumes.
@@ -45,7 +60,7 @@ class Scanner:
 
     def scan(self) -> Generator[Path, None, None]:
         """
-        Yield every supported image path under self.root.
+        Yield every supported media path under self.root.
 
         Skips hidden directories (names starting with '.') and symlinks to
         avoid loops on macOS alias-heavy libraries.
@@ -57,7 +72,7 @@ class Scanner:
                 log.debug("Found: %s", path)
                 count += 1
                 yield path
-        log.info("Scan complete — %d image(s) found.", count)
+        log.info("Scan complete — %d media file(s) found.", count)
 
     # ------------------------------------------------------------------
     # Internal helpers (override in subclasses for custom behaviour)

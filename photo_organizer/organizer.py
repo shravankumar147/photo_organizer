@@ -2,7 +2,8 @@
 organizer.py — folder creation and file-copy layer.
 
 Responsibilities:
-  * Decide the destination path for each image (YYYY/MM/DD/<filename>)
+  * Decide the destination path for each media file
+  * Sort into images/raw/videos buckets before date folders
   * Handle duplicates by appending a numeric suffix
   * Copy files (or simulate in dry-run mode)
   * Hash files for deduplication (bonus feature)
@@ -28,6 +29,7 @@ from pathlib import Path
 from typing import Literal
 
 from photo_organizer.metadata import ImageMetadata, MetadataExtractor
+from photo_organizer.scanner import media_bucket_for_path
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +48,7 @@ class OrganizerConfig:
 
 class Organizer:
     """
-    Moves each image into its YYYY/MM/DD destination folder.
+    Moves each file into its bucketed destination folder.
 
     Single public method: `process(path) -> ProcessResult`
     """
@@ -68,9 +70,15 @@ class Organizer:
             log.error("Skipping (no date): %s", src_path)
             return "errors"
 
+        bucket = media_bucket_for_path(src_path)
+        if bucket is None:
+            log.error("Skipping (unsupported type): %s", src_path)
+            return "errors"
+
+        log.info("  Bucket : %s", bucket)
         log.info("  Date   : %s  [source: %s]", meta.date.date(), meta.date_source)
 
-        dst_dir = self._destination_dir(meta)
+        dst_dir = self._destination_dir(meta, bucket)
         dst_path = self._resolve_destination(src_path, dst_dir)
 
         log.info("  Target : %s", dst_path)
@@ -85,15 +93,21 @@ class Organizer:
     # Destination resolution
     # ------------------------------------------------------------------
 
-    def _destination_dir(self, meta: ImageMetadata) -> Path:
+    def _destination_dir(self, meta: ImageMetadata, bucket: str) -> Path:
         """
-        Map an image to its target directory.
+        Map a file to its target directory.
 
         Override this in a subclass to implement event-based, AI-driven, or
         any other grouping strategy.
         """
         d = meta.date
-        return self.config.dst / f"{d.year:04d}" / f"{d.month:02d}" / f"{d.day:02d}"
+        return (
+            self.config.dst
+            / bucket
+            / f"{d.year:04d}"
+            / f"{d.month:02d}"
+            / f"{d.day:02d}"
+        )
 
     def _resolve_destination(self, src: Path, dst_dir: Path) -> Path:
         """

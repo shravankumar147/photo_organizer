@@ -16,7 +16,7 @@ from typing import Optional
 
 from photo_organizer.cli import build_parser
 from photo_organizer.organizer import Organizer, OrganizerConfig
-from photo_organizer.scanner import Scanner
+from photo_organizer.scanner import DEFAULT_EXTENSIONS, Scanner
 from photo_organizer.utils import configure_logging, print_summary
 
 
@@ -35,7 +35,7 @@ class OrganizeRequest:
     verbose: bool = False
     workers: int = 4  # for future ThreadPoolExecutor usage
     extensions: frozenset[str] = field(
-        default_factory=lambda: frozenset({"jpg", "jpeg", "png", "heic"})
+        default_factory=lambda: DEFAULT_EXTENSIONS
     )
 
 
@@ -62,8 +62,8 @@ def run(request: OrganizeRequest) -> dict:
 
     stats = {"processed": 0, "skipped": 0, "errors": 0}
 
-    for image_path in scanner.scan():
-        result = organizer.process(image_path)
+    for media_path in scanner.scan():
+        result = organizer.process(media_path)
         stats[result] += 1
 
     return stats

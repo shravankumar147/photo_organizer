@@ -62,8 +62,11 @@ class TestScanner:
         _touch(tmp_src, "b.JPEG")  # uppercase
         _touch(tmp_src, "c.png")
         _touch(tmp_src, "d.heic")
+        _touch(tmp_src, "e.CR3")
+        _touch(tmp_src, "f.raw")
+        _touch(tmp_src, "g.mp4")
+        _touch(tmp_src, "h.MOV")
         _touch(tmp_src, "e.txt")  # should be ignored
-        _touch(tmp_src, "f.mov")  # should be ignored
 
         found = list(Scanner(tmp_src).scan())
         names = {p.name for p in found}
@@ -71,8 +74,11 @@ class TestScanner:
         assert "b.JPEG" in names
         assert "c.png" in names
         assert "d.heic" in names
+        assert "e.CR3" in names
+        assert "f.raw" in names
+        assert "g.mp4" in names
+        assert "h.MOV" in names
         assert "e.txt" not in names
-        assert "f.mov" not in names
 
     def test_recurses_subdirectories(self, tmp_src: Path):
         sub = tmp_src / "2024" / "01"
@@ -163,16 +169,16 @@ class TestOrganizer:
         config = OrganizerConfig(dst=tmp_dst, dry_run=True)
         org = Organizer(config)
         meta = self._make_meta(img, datetime(2024, 3, 5))
-        dst_dir = org._destination_dir(meta)
-        assert dst_dir == tmp_dst / "2024" / "03" / "05"
+        dst_dir = org._destination_dir(meta, "images")
+        assert dst_dir == tmp_dst / "images" / "2024" / "03" / "05"
 
     def test_destination_dir_zero_padded(self, tmp_dst: Path, tmp_src: Path):
         img = _touch(tmp_src, "photo.jpg")
         config = OrganizerConfig(dst=tmp_dst, dry_run=True)
         org = Organizer(config)
         meta = self._make_meta(img, datetime(2024, 1, 1))
-        dst_dir = org._destination_dir(meta)
-        assert str(dst_dir).endswith("2024/01/01")
+        dst_dir = org._destination_dir(meta, "images")
+        assert str(dst_dir).endswith("images/2024/01/01")
 
     def test_dry_run_does_not_copy(self, tmp_src: Path, tmp_dst: Path):
         img = _touch(tmp_src, "photo.jpg")
@@ -197,13 +203,13 @@ class TestOrganizer:
             result = org.process(img)
 
         assert result == "processed"
-        expected = tmp_dst / "2023" / "12" / "25" / "shot.jpg"
+        expected = tmp_dst / "images" / "2023" / "12" / "25" / "shot.jpg"
         assert expected.exists()
         assert expected.read_bytes() == b"jpeg_bytes"
 
     def test_duplicate_filename_gets_suffix(self, tmp_src: Path, tmp_dst: Path):
         # Pre-create the destination with DIFFERENT content → not a true dup
-        dst_dir = tmp_dst / "2023" / "12" / "25"
+        dst_dir = tmp_dst / "images" / "2023" / "12" / "25"
         dst_dir.mkdir(parents=True)
         (dst_dir / "shot.jpg").write_bytes(b"existing_content")
 
@@ -220,7 +226,7 @@ class TestOrganizer:
 
     def test_true_duplicate_is_skipped(self, tmp_src: Path, tmp_dst: Path):
         content = b"identical_bytes"
-        dst_dir = tmp_dst / "2023" / "12" / "25"
+        dst_dir = tmp_dst / "images" / "2023" / "12" / "25"
         dst_dir.mkdir(parents=True)
         (dst_dir / "shot.jpg").write_bytes(content)
 
@@ -246,6 +252,30 @@ class TestOrganizer:
             result = org.process(img)
 
         assert result == "errors"
+
+    def test_raw_files_land_under_raw_bucket(self, tmp_src: Path, tmp_dst: Path):
+        img = _touch(tmp_src, "capture.CR3", b"raw_bytes")
+        config = OrganizerConfig(dst=tmp_dst, dry_run=False, hash_duplicates=False)
+        org = Organizer(config)
+
+        with patch.object(org._extractor, "extract") as mock_extract:
+            mock_extract.return_value = self._make_meta(img, datetime(2024, 7, 4))
+            result = org.process(img)
+
+        assert result == "processed"
+        assert (tmp_dst / "raw" / "2024" / "07" / "04" / "capture.CR3").exists()
+
+    def test_video_files_land_under_videos_bucket(self, tmp_src: Path, tmp_dst: Path):
+        video = _touch(tmp_src, "clip.mp4", b"video_bytes")
+        config = OrganizerConfig(dst=tmp_dst, dry_run=False, hash_duplicates=False)
+        org = Organizer(config)
+
+        with patch.object(org._extractor, "extract") as mock_extract:
+            mock_extract.return_value = self._make_meta(video, datetime(2024, 8, 9))
+            result = org.process(video)
+
+        assert result == "processed"
+        assert (tmp_dst / "videos" / "2024" / "08" / "09" / "clip.mp4").exists()
 
     def test_sha256_same_content(self, tmp_src: Path, tmp_dst: Path):
         a = _touch(tmp_src, "a.jpg", b"abc")
