@@ -50,9 +50,11 @@ class Scanner:
         self,
         root: Path,
         extensions: frozenset[str] = DEFAULT_EXTENSIONS,
+        excluded_roots: tuple[Path, ...] = (),
     ) -> None:
         self.root = root
         self._extensions = frozenset(ext.lower() for ext in extensions)
+        self._excluded_roots = tuple(path.resolve(strict=False) for path in excluded_roots)
 
     # ------------------------------------------------------------------
     # Public API
@@ -87,6 +89,9 @@ class Scanner:
             return
 
         for entry in entries:
+            if self._is_excluded(entry):
+                log.debug("Skipping excluded path: %s", entry)
+                continue
             if entry.name.startswith("."):
                 continue
             if entry.is_symlink():
@@ -100,3 +105,10 @@ class Scanner:
     def _is_supported(self, path: Path) -> bool:
         """Return True when the file extension is in the allow-list."""
         return path.suffix.lstrip(".").lower() in self._extensions
+
+    def _is_excluded(self, path: Path) -> bool:
+        resolved = path.resolve(strict=False)
+        return any(
+            resolved == excluded or resolved.is_relative_to(excluded)
+            for excluded in self._excluded_roots
+        )

@@ -105,6 +105,17 @@ class TestScanner:
         assert any(p.name == "video.mp4" for p in found)
         assert not any(p.name == "photo.jpg" for p in found)
 
+    def test_excludes_destination_subtree(self, tmp_src: Path):
+        organized = tmp_src / "organized"
+        organized.mkdir()
+        _touch(organized, "sorted.jpg")
+        _touch(tmp_src, "fresh.jpg")
+
+        found = list(Scanner(tmp_src, excluded_roots=(organized,)).scan())
+        names = {p.name for p in found}
+        assert "fresh.jpg" in names
+        assert "sorted.jpg" not in names
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # MetadataExtractor tests
@@ -180,7 +191,7 @@ class TestOrganizer:
         dst_dir = org._destination_dir(meta, "images")
         assert str(dst_dir).endswith("images/2024/01/01")
 
-    def test_dry_run_does_not_copy(self, tmp_src: Path, tmp_dst: Path):
+    def test_dry_run_does_not_move(self, tmp_src: Path, tmp_dst: Path):
         img = _touch(tmp_src, "photo.jpg")
         config = OrganizerConfig(dst=tmp_dst, dry_run=True)
         org = Organizer(config)
@@ -190,10 +201,11 @@ class TestOrganizer:
             result = org.process(img)
 
         assert result == "processed"
-        # Nothing should have been copied
+        # Nothing should have been moved
         assert not any(tmp_dst.rglob("*.jpg"))
+        assert img.exists()
 
-    def test_copies_file_to_correct_location(self, tmp_src: Path, tmp_dst: Path):
+    def test_moves_file_to_correct_location(self, tmp_src: Path, tmp_dst: Path):
         img = _touch(tmp_src, "shot.jpg", b"jpeg_bytes")
         config = OrganizerConfig(dst=tmp_dst, dry_run=False, hash_duplicates=False)
         org = Organizer(config)
@@ -206,6 +218,7 @@ class TestOrganizer:
         expected = tmp_dst / "images" / "2023" / "12" / "25" / "shot.jpg"
         assert expected.exists()
         assert expected.read_bytes() == b"jpeg_bytes"
+        assert not img.exists()
 
     def test_duplicate_filename_gets_suffix(self, tmp_src: Path, tmp_dst: Path):
         # Pre-create the destination with DIFFERENT content → not a true dup
@@ -240,6 +253,7 @@ class TestOrganizer:
 
         # Should be skipped — identical content already exists
         assert result == "skipped"
+        assert not img.exists()
         # No _1 variant created
         assert not (dst_dir / "shot_1.jpg").exists()
 
@@ -321,6 +335,25 @@ class TestIntegration:
         assert stats["processed"] + stats["errors"] == 2
         # Nothing should count as skipped in a fresh run
         assert stats["skipped"] == 0
+
+    def test_pipeline_skips_nested_organized_directory(self, tmp_src: Path):
+        organized = tmp_src / "organized"
+        organized.mkdir()
+        _touch(organized, "sorted.jpg", b"done")
+        _touch(tmp_src, "fresh.jpg", b"new")
+
+        from photo_organizer.main import OrganizeRequest, run
+
+        request = OrganizeRequest(
+            src=tmp_src,
+            dst=organized,
+            dry_run=False,
+            verbose=False,
+        )
+        stats = run(request)
+
+        assert stats["processed"] + stats["errors"] == 1
+        assert (organized / "images").exists()
 
     def test_dry_run_no_files_created(self, tmp_src: Path, tmp_dst: Path):
         _touch(tmp_src, "photo.jpg", b"fake")

@@ -53,7 +53,11 @@ def run(request: OrganizeRequest) -> dict:
     log.info("Destination : %s", request.dst)
     log.info("Dry-run     : %s", request.dry_run)
 
-    scanner = Scanner(root=request.src, extensions=request.extensions)
+    scanner = Scanner(
+        root=request.src,
+        extensions=request.extensions,
+        excluded_roots=(request.dst,),
+    )
     config = OrganizerConfig(
         dst=request.dst,
         dry_run=request.dry_run,
@@ -75,7 +79,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     request = OrganizeRequest(
         src=Path(args.src),
-        dst=Path(args.dst),
+        dst=Path(args.dst) if args.dst else Path(args.src) / "organized",
         dry_run=args.dry_run,
         verbose=args.verbose,
     )

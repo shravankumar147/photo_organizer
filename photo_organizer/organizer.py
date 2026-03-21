@@ -5,7 +5,7 @@ Responsibilities:
   * Decide the destination path for each media file
   * Sort into images/raw/videos buckets before date folders
   * Handle duplicates by appending a numeric suffix
-  * Copy files (or simulate in dry-run mode)
+  * Move files (or simulate in dry-run mode)
   * Hash files for deduplication (bonus feature)
 
 Extension hook (event-based grouping):
@@ -43,7 +43,7 @@ _HASH_CHUNK = 4 * 1024 * 1024
 class OrganizerConfig:
     dst: Path
     dry_run: bool = False
-    hash_duplicates: bool = True  # SHA-256 check before copy
+    hash_duplicates: bool = True  # SHA-256 check before move
 
 
 class Organizer:
@@ -62,7 +62,7 @@ class Organizer:
     # ------------------------------------------------------------------
 
     def process(self, src_path: Path) -> ProcessResult:
-        """Extract metadata, decide destination, copy file."""
+        """Extract metadata, decide destination, move file."""
         log.info("Processing: %s", src_path)
 
         meta = self._extractor.extract(src_path)
@@ -84,10 +84,10 @@ class Organizer:
         log.info("  Target : %s", dst_path)
 
         if self.config.dry_run:
-            log.info("  [dry-run] Would copy → %s", dst_path)
+            log.info("  [dry-run] Would move → %s", dst_path)
             return "processed"
 
-        return self._copy(src_path, dst_dir, dst_path)
+        return self._move(src_path, dst_dir, dst_path)
 
     # ------------------------------------------------------------------
     # Destination resolution
@@ -135,19 +135,24 @@ class Organizer:
     # File I/O
     # ------------------------------------------------------------------
 
-    def _copy(self, src: Path, dst_dir: Path, dst: Path) -> ProcessResult:
+    def _move(self, src: Path, dst_dir: Path, dst: Path) -> ProcessResult:
         # Check whether resolve decided this is a true duplicate
         if dst.exists() and self.config.hash_duplicates and self._same_content(src, dst):
-            log.info("  [skip] Duplicate content, not copying.")
+            try:
+                src.unlink()
+            except OSError as exc:
+                log.error("  [error] Failed to remove duplicate %s: %s", src, exc)
+                return "errors"
+            log.info("  [skip] Duplicate content already organised; removed source.")
             return "skipped"
 
         try:
             dst_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dst)  # copy2 preserves timestamps
-            log.info("  [ok] Copied → %s", dst)
+            shutil.move(str(src), str(dst))
+            log.info("  [ok] Moved → %s", dst)
             return "processed"
         except OSError as exc:
-            log.error("  [error] Failed to copy %s → %s: %s", src, dst, exc)
+            log.error("  [error] Failed to move %s → %s: %s", src, dst, exc)
             return "errors"
 
     # ------------------------------------------------------------------
