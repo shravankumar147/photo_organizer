@@ -3,7 +3,7 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: working tree with empty-directory cleanup
+- Latest local commit: `0f49fd8` `remove empty source directories`
 - Latest remote commit: `31f9bed` `bucket media files by type`
 - Test status: `.venv/bin/pytest -q` passing (`29 passed`)
 
