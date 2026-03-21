@@ -70,7 +70,42 @@ def run(request: OrganizeRequest) -> dict:
         result = organizer.process(media_path)
         stats[result] += 1
 
+    if not request.dry_run:
+        removed_dirs = remove_empty_directories(
+            root=request.src,
+            excluded_roots=(request.dst,),
+        )
+        log.info("Removed %d empty directorie(s).", removed_dirs)
+
     return stats
+
+
+def remove_empty_directories(root: Path, excluded_roots: tuple[Path, ...] = ()) -> int:
+    """Remove empty directories under root, excluding protected subtrees."""
+    removed = 0
+    protected = tuple(path.resolve(strict=False) for path in excluded_roots)
+
+    for directory in sorted(
+        (path for path in root.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    ):
+        resolved = directory.resolve(strict=False)
+        if any(
+            resolved == excluded or resolved.is_relative_to(excluded)
+            for excluded in protected
+        ):
+            continue
+
+        try:
+            next(directory.iterdir())
+        except StopIteration:
+            directory.rmdir()
+            removed += 1
+        except OSError:
+            continue
+
+    return removed
 
 
 def main(argv: Optional[list[str]] = None) -> int:

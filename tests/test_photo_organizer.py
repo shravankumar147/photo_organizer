@@ -393,6 +393,27 @@ class TestIntegration:
         assert not first.exists()
         assert not second.exists()
 
+    def test_pipeline_removes_empty_source_directories(self, tmp_src: Path):
+        dated = tmp_src / "2024" / "01"
+        dated.mkdir(parents=True)
+        _touch(dated, "photo.jpg", b"fake")
+
+        from photo_organizer.main import OrganizeRequest, run
+
+        organized = tmp_src / "organized"
+        request = OrganizeRequest(
+            src=tmp_src,
+            dst=organized,
+            dry_run=False,
+            verbose=False,
+        )
+        stats = run(request)
+
+        assert stats["processed"] == 1
+        assert not dated.exists()
+        assert not (tmp_src / "2024").exists()
+        assert organized.exists()
+
     def test_dry_run_no_files_created(self, tmp_src: Path, tmp_dst: Path):
         _touch(tmp_src, "photo.jpg", b"fake")
 
