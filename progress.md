@@ -3,9 +3,9 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `429041e` `move files into organized destination`
+- Latest local commit: working tree with duplicate-drop update
 - Latest remote commit: `31f9bed` `bucket media files by type`
-- Test status: `.venv/bin/pytest -q` passing (`26 passed`)
+- Test status: `.venv/bin/pytest -q` passing (`28 passed`)
 
 ## Progress Log
 
@@ -21,6 +21,7 @@
 - Defaulted the destination to `/Volumes/EOS_DIGITAL/DCIM/100CANON/organized`.
 - Changed file handling from copy to move so the organizer acts as a cleanup pass.
 - Added scanner protection to skip the nested `organized/` subtree during runs.
+- Dropped duplicate files by content even when filenames differ within the same target bucket/date.
 
 ## Next Step
 

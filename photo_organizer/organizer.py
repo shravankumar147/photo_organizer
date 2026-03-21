@@ -114,18 +114,21 @@ class Organizer:
         Return a collision-free destination path.
 
         Strategy: <name>.<ext> → <name>_1.<ext> → <name>_2.<ext> → …
-        If hash_duplicates is enabled and the hashes match, we skip the file
-        entirely (true duplicate, not just same name).
+        If hash_duplicates is enabled and matching content already exists
+        anywhere in the target directory, we skip the file entirely.
         """
+        if self.config.hash_duplicates:
+            duplicate = self._find_duplicate_in_dir(src, dst_dir)
+            if duplicate is not None:
+                log.info("  [skip] Identical file already exists: %s", duplicate)
+                return duplicate
+
         stem = src.stem
         suffix = src.suffix
         candidate = dst_dir / src.name
         counter = 0
 
         while candidate.exists():
-            if self.config.hash_duplicates and self._same_content(src, candidate):
-                log.info("  [skip] Identical file already exists: %s", candidate)
-                return candidate  # signal caller to skip
             counter += 1
             candidate = dst_dir / f"{stem}_{counter}{suffix}"
 
@@ -175,3 +178,14 @@ class Organizer:
             return self._sha256(a) == self._sha256(b)
         except OSError:
             return False
+
+    def _find_duplicate_in_dir(self, src: Path, dst_dir: Path) -> Path | None:
+        try:
+            if not dst_dir.exists():
+                return None
+            for candidate in dst_dir.iterdir():
+                if candidate.is_file() and self._same_content(src, candidate):
+                    return candidate
+        except OSError:
+            return None
+        return None

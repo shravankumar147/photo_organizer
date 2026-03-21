@@ -257,6 +257,24 @@ class TestOrganizer:
         # No _1 variant created
         assert not (dst_dir / "shot_1.jpg").exists()
 
+    def test_duplicate_content_with_different_name_is_skipped(self, tmp_src: Path, tmp_dst: Path):
+        content = b"identical_bytes"
+        dst_dir = tmp_dst / "images" / "2023" / "12" / "25"
+        dst_dir.mkdir(parents=True)
+        (dst_dir / "original.jpg").write_bytes(content)
+
+        img = _touch(tmp_src, "copy.jpg", content)
+        config = OrganizerConfig(dst=tmp_dst, dry_run=False, hash_duplicates=True)
+        org = Organizer(config)
+
+        with patch.object(org._extractor, "extract") as mock_extract:
+            mock_extract.return_value = self._make_meta(img, datetime(2023, 12, 25))
+            result = org.process(img)
+
+        assert result == "skipped"
+        assert not img.exists()
+        assert not (dst_dir / "copy.jpg").exists()
+
     def test_errors_returned_when_metadata_fails(self, tmp_src: Path, tmp_dst: Path):
         img = _touch(tmp_src, "corrupt.jpg")
         config = OrganizerConfig(dst=tmp_dst, dry_run=False)
@@ -354,6 +372,26 @@ class TestIntegration:
 
         assert stats["processed"] + stats["errors"] == 1
         assert (organized / "images").exists()
+
+    def test_pipeline_drops_duplicate_content_even_with_different_names(self, tmp_src: Path):
+        first = _touch(tmp_src, "a.jpg", b"same")
+        second = _touch(tmp_src, "b.jpg", b"same")
+
+        from photo_organizer.main import OrganizeRequest, run
+
+        organized = tmp_src / "organized"
+        request = OrganizeRequest(
+            src=tmp_src,
+            dst=organized,
+            dry_run=False,
+            verbose=False,
+        )
+        stats = run(request)
+
+        assert stats["processed"] == 1
+        assert stats["skipped"] == 1
+        assert not first.exists()
+        assert not second.exists()
 
     def test_dry_run_no_files_created(self, tmp_src: Path, tmp_dst: Path):
         _touch(tmp_src, "photo.jpg", b"fake")
