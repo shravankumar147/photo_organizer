@@ -3,7 +3,7 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `0f49fd8` `remove empty source directories`
+- Latest local commit: working tree with date-first destination layout
 - Latest remote commit: `31f9bed` `bucket media files by type`
 - Test status: `.venv/bin/pytest -q` passing (`29 passed`)
 
@@ -23,6 +23,7 @@
 - Added scanner protection to skip the nested `organized/` subtree during runs.
 - Dropped duplicate files by content even when filenames differ within the same target bucket/date.
 - Added post-run cleanup to remove empty source directories after files are organized.
+- Switched the output layout to `YYYY/MM/DD/images|raw|videos/` for date-first browsing.
 
 ## Next Step
 

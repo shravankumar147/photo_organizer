@@ -3,7 +3,7 @@ organizer.py — folder creation and file-copy layer.
 
 Responsibilities:
   * Decide the destination path for each media file
-  * Sort into images/raw/videos buckets before date folders
+  * Sort into date folders before images/raw/videos buckets
   * Handle duplicates by appending a numeric suffix
   * Move files (or simulate in dry-run mode)
   * Hash files for deduplication (bonus feature)
@@ -48,7 +48,7 @@ class OrganizerConfig:
 
 class Organizer:
     """
-    Moves each file into its bucketed destination folder.
+    Moves each file into its date-first destination folder.
 
     Single public method: `process(path) -> ProcessResult`
     """
@@ -103,10 +103,10 @@ class Organizer:
         d = meta.date
         return (
             self.config.dst
-            / bucket
             / f"{d.year:04d}"
             / f"{d.month:02d}"
             / f"{d.day:02d}"
+            / bucket
         )
 
     def _resolve_destination(self, src: Path, dst_dir: Path) -> Path:
