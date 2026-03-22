@@ -3,7 +3,7 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: working tree with ftp upload script
+- Latest local commit: `d4adac3` `add ftp upload script`
 - Latest remote commit: `31f9bed` `bucket media files by type`
 - Test status: `.venv/bin/pytest -q` passing (`40 passed`)
 
