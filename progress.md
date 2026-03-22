@@ -3,7 +3,7 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: working tree with cloud-copy script
+- Latest local commit: `bc88bbe` `add cloud-ready media copy script`
 - Latest remote commit: `31f9bed` `bucket media files by type`
 - Test status: `.venv/bin/pytest -q` passing (`38 passed`)
 
