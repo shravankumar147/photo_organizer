@@ -35,7 +35,12 @@ def configure_logging(verbose: bool = False) -> None:
 
 def print_summary(stats: dict[str, int]) -> None:
     """Print a human-readable run summary to stdout."""
-    total = sum(stats.values())
+    total = (
+        stats.get("processed", 0)
+        + stats.get("skipped", 0)
+        + stats.get("errors", 0)
+    )
+    elapsed = float(stats.get("elapsed_seconds", 0.0))
     print()
     print("─" * 42)
     print("  Photo Organizer — Run Summary")
@@ -44,5 +49,6 @@ def print_summary(stats: dict[str, int]) -> None:
     print(f"  ✓ Processed         : {stats.get('processed', 0)}")
     print(f"  ⊘ Skipped           : {stats.get('skipped', 0)}")
     print(f"  ✗ Errors            : {stats.get('errors', 0)}")
+    print(f"  Total time          : {elapsed:.2f}s")
     print("─" * 42)
     print()

@@ -3,9 +3,9 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `894d383` `switch to date-first media layout`
+- Latest local commit: working tree with elapsed-time summary
 - Latest remote commit: `31f9bed` `bucket media files by type`
-- Test status: `.venv/bin/pytest -q` passing (`29 passed`)
+- Test status: `.venv/bin/pytest -q` passing (`30 passed`)
 
 ## Progress Log
 
@@ -24,6 +24,7 @@
 - Dropped duplicate files by content even when filenames differ within the same target bucket/date.
 - Added post-run cleanup to remove empty source directories after files are organized.
 - Switched the output layout to `YYYY/MM/DD/images|raw|videos/` for date-first browsing.
+- Added total elapsed time to the run summary and returned stats.
 
 ## Next Step
 

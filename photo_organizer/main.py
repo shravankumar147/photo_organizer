@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -48,6 +49,7 @@ def run(request: OrganizeRequest) -> dict:
     """
     configure_logging(verbose=request.verbose)
     log = logging.getLogger(__name__)
+    started_at = time.perf_counter()
 
     log.info("Source      : %s", request.src)
     log.info("Destination : %s", request.dst)
@@ -76,6 +78,8 @@ def run(request: OrganizeRequest) -> dict:
             excluded_roots=(request.dst,),
         )
         log.info("Removed %d empty directorie(s).", removed_dirs)
+
+    stats["elapsed_seconds"] = time.perf_counter() - started_at
 
     return stats
 

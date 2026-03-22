@@ -21,8 +21,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from photo_organizer.metadata import ImageMetadata, MetadataExtractor
+from photo_organizer.main import remove_empty_directories
 from photo_organizer.organizer import Organizer, OrganizerConfig
 from photo_organizer.scanner import Scanner
+from photo_organizer.utils import print_summary
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -353,6 +355,7 @@ class TestIntegration:
         assert stats["processed"] + stats["errors"] == 2
         # Nothing should count as skipped in a fresh run
         assert stats["skipped"] == 0
+        assert stats["elapsed_seconds"] >= 0
 
     def test_pipeline_skips_nested_organized_directory(self, tmp_src: Path):
         organized = tmp_src / "organized"
@@ -372,6 +375,7 @@ class TestIntegration:
 
         assert stats["processed"] + stats["errors"] == 1
         assert (organized / "2026" / "03" / "22" / "images").exists()
+        assert stats["elapsed_seconds"] >= 0
 
     def test_pipeline_drops_duplicate_content_even_with_different_names(self, tmp_src: Path):
         first = _touch(tmp_src, "a.jpg", b"same")
@@ -392,6 +396,7 @@ class TestIntegration:
         assert stats["skipped"] == 1
         assert not first.exists()
         assert not second.exists()
+        assert stats["elapsed_seconds"] >= 0
 
     def test_pipeline_removes_empty_source_directories(self, tmp_src: Path):
         dated = tmp_src / "2024" / "01"
@@ -413,6 +418,7 @@ class TestIntegration:
         assert not dated.exists()
         assert not (tmp_src / "2024").exists()
         assert organized.exists()
+        assert stats["elapsed_seconds"] >= 0
 
     def test_dry_run_no_files_created(self, tmp_src: Path, tmp_dst: Path):
         _touch(tmp_src, "photo.jpg", b"fake")
@@ -424,3 +430,19 @@ class TestIntegration:
 
         # Destination should be empty
         assert not any(tmp_dst.rglob("*"))
+
+
+class TestUtils:
+    def test_print_summary_includes_total_time(self, capsys: pytest.CaptureFixture[str]):
+        print_summary(
+            {
+                "processed": 3,
+                "skipped": 1,
+                "errors": 0,
+                "elapsed_seconds": 1.23,
+            }
+        )
+
+        output = capsys.readouterr().out
+        assert "Total files scanned : 4" in output
+        assert "Total time          : 1.23s" in output
