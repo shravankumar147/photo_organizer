@@ -3,7 +3,7 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `d4adac3` `add ftp upload script`
+- Latest local commit: working tree with package-level workflow modules
 - Latest remote commit: `31f9bed` `bucket media files by type`
 - Test status: `.venv/bin/pytest -q` passing (`40 passed`)
 
@@ -32,6 +32,7 @@
 - Ran `copy_media_for_cloud.py` successfully and copied 61 image files into `cloud_ready/`.
 - Added `ftp_upload.py` to upload cloud-ready images and move successful uploads into local FTP trash.
 - Could not run the real FTP upload yet because `FTP_HOST`, `FTP_USER`, and `FTP_PASSWORD` are not set in the environment.
+- Moved cloud copy and FTP upload logic into package modules and added a package workflow runner.
 
 ## Next Step
 

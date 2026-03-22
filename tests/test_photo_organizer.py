@@ -20,8 +20,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from copy_media_for_cloud import copy_for_cloud
-from ftp_upload import upload_to_ftp
+from photo_organizer.cloud_copy import copy_for_cloud
+from photo_organizer.ftp_upload import upload_to_ftp
 from photo_organizer.metadata import ImageMetadata, MetadataExtractor
 from photo_organizer.main import remove_empty_directories
 from photo_organizer.organizer import Organizer, OrganizerConfig

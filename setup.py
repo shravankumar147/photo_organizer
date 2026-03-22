@@ -15,6 +15,9 @@ setup(
     entry_points={
         "console_scripts": [
             "photo-organizer=photo_organizer.main:main",
+            "photo-organizer-cloud-copy=photo_organizer.cloud_copy:main",
+            "photo-organizer-ftp-upload=photo_organizer.ftp_upload:main",
+            "photo-organizer-workflow=photo_organizer.workflow:main",
         ]
     },
 )
