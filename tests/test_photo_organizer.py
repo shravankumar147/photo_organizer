@@ -125,12 +125,71 @@ class TestScanner:
 
 
 class TestMetadataExtractor:
+    def test_prefers_exif_original_over_other_dates(self, tmp_src: Path):
+        img = _touch(tmp_src, "photo.jpg")
+        extractor = MetadataExtractor()
+
+        with patch.object(
+            extractor,
+            "_exif_date",
+            return_value=(datetime(2021, 5, 6, 7, 8, 9), "exif_original"),
+        ), patch.object(
+            extractor,
+            "_mdls_capture_date",
+            return_value=(datetime(2022, 1, 1, 0, 0, 0), "mdls_content_creation"),
+        ), patch.object(
+            extractor,
+            "_birth_date",
+            return_value=datetime(2023, 1, 1, 0, 0, 0),
+        ), patch.object(
+            extractor,
+            "_mtime_date",
+            return_value=datetime(2024, 1, 1, 0, 0, 0),
+        ):
+            meta = extractor.extract(img)
+
+        assert meta is not None
+        assert meta.date == datetime(2021, 5, 6, 7, 8, 9)
+        assert meta.date_source == "exif_original"
+
+    def test_uses_mdls_before_filesystem_timestamps(self, tmp_src: Path):
+        img = _touch(tmp_src, "clip.mp4")
+        extractor = MetadataExtractor()
+
+        with patch.object(
+            extractor,
+            "_exif_date",
+            return_value=(None, ""),
+        ), patch.object(
+            extractor,
+            "_mdls_capture_date",
+            return_value=(datetime(2021, 6, 7, 8, 9, 10), "mdls_media_creation"),
+        ), patch.object(
+            extractor,
+            "_birth_date",
+            return_value=datetime(2022, 1, 1, 0, 0, 0),
+        ), patch.object(
+            extractor,
+            "_mtime_date",
+            return_value=datetime(2023, 1, 1, 0, 0, 0),
+        ):
+            meta = extractor.extract(img)
+
+        assert meta is not None
+        assert meta.date == datetime(2021, 6, 7, 8, 9, 10)
+        assert meta.date_source == "mdls_media_creation"
+
     def test_falls_back_to_mtime_when_no_exif(self, tmp_src: Path):
         img = _touch(tmp_src, "no_exif.jpg")
         extractor = MetadataExtractor()
         meta = extractor.extract(img)
         assert meta is not None
-        assert meta.date_source in ("birthtime", "mtime")
+        assert meta.date_source in (
+            "mdls_content_creation",
+            "mdls_media_creation",
+            "birthtime",
+            "mtime",
+        )
         assert isinstance(meta.date, datetime)
 
     def test_returns_none_for_unreadable_file(self, tmp_src: Path):
@@ -158,6 +217,16 @@ class TestMetadataExtractor:
         extractor = MetadataExtractor()
         dt = extractor._parse_exif_dt("   ")
         assert dt is None
+
+    def test_mdls_datetime_parsing(self, tmp_src: Path):
+        img = _touch(tmp_src, "clip.mp4")
+        extractor = MetadataExtractor()
+
+        with patch("photo_organizer.metadata.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="2024-07-15 14:30:00 +0530\n")
+            dt = extractor._mdls_value(img, "kMDItemMediaCreationDate")
+
+        assert dt == datetime(2024, 7, 15, 14, 30, 0)
 
     def test_metadata_dataclass_fields(self, tmp_src: Path):
         img = _touch(tmp_src, "x.png")

@@ -3,9 +3,11 @@ metadata.py — date extraction layer.
 
 Priority chain:
   1. EXIF DateTimeOriginal  (most accurate — camera-set timestamp)
-  2. EXIF DateTime          (file-written timestamp, still EXIF)
-  3. stat().st_birthtime    (macOS file creation — not available on Linux)
-  4. stat().st_mtime        (modification time — last resort)
+  2. EXIF DateTimeDigitized (camera digitization timestamp)
+  3. EXIF DateTime          (file-written timestamp, still embedded metadata)
+  4. Spotlight/mdls capture metadata on macOS (CR3/MP4 fallback)
+  5. stat().st_birthtime    (macOS file creation — not available on Linux)
+  6. stat().st_mtime        (modification time — last resort)
 
 Extension hook (AI pipeline):
   The `ImageMetadata` dataclass is designed to grow.  Future fields:
@@ -22,7 +24,7 @@ Extension hook (AI pipeline):
 from __future__ import annotations
 
 import logging
-import struct
+import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -32,10 +34,15 @@ log = logging.getLogger(__name__)
 
 # EXIF tag IDs we care about (raw values from the TIFF spec)
 _TAG_DATETIME_ORIGINAL = 0x9003  # 36867
+_TAG_DATETIME_DIGITIZED = 0x9004  # 36868
 _TAG_DATETIME = 0x0132  # 306
 
 # EXIF datetime format string
 _EXIF_DT_FMT = "%Y:%m:%d %H:%M:%S"
+_MDLS_DT_FMTS = (
+    "%Y-%m-%d %H:%M:%S %z",
+    "%Y-%m-%d %H:%M:%S",
+)
 
 
 @dataclass
@@ -49,7 +56,7 @@ class ImageMetadata:
 
     path: Path
     date: datetime
-    date_source: str  # "exif_original" | "exif_datetime" | "birthtime" | "mtime"
+    date_source: str  # "exif_original" | "exif_digitized" | "exif_datetime" | "mdls_*" | "birthtime" | "mtime"
 
     # ── Future AI fields (not yet populated) ──────────────────────────
     # embedding: list[float] | None = None
@@ -80,17 +87,22 @@ class MetadataExtractor:
     # ------------------------------------------------------------------
 
     def _extract_date(self, path: Path) -> tuple[Optional[datetime], str]:
-        # 1 & 2 — EXIF
+        # 1-3 — EXIF / embedded image metadata
         exif_date, exif_source = self._exif_date(path)
         if exif_date:
             return exif_date, exif_source
 
-        # 3 — macOS birthtime
+        # 4 — macOS Spotlight metadata for RAW/video capture times
+        mdls_date, mdls_source = self._mdls_capture_date(path)
+        if mdls_date:
+            return mdls_date, mdls_source
+
+        # 5 — macOS birthtime
         birth = self._birth_date(path)
         if birth:
             return birth, "birthtime"
 
-        # 4 — mtime
+        # 6 — mtime
         mtime = self._mtime_date(path)
         if mtime:
             return mtime, "mtime"
@@ -121,9 +133,10 @@ class MetadataExtractor:
                 if not exif_data:
                     return None, ""
 
-                # Try DateTimeOriginal first
+                # Prefer camera capture timestamps over generic file timestamps
                 for tag_id, source_label in (
                     (_TAG_DATETIME_ORIGINAL, "exif_original"),
+                    (_TAG_DATETIME_DIGITIZED, "exif_digitized"),
                     (_TAG_DATETIME, "exif_datetime"),
                 ):
                     raw_val = exif_data.get(tag_id)
@@ -137,6 +150,50 @@ class MetadataExtractor:
             log.debug("EXIF extraction failed for %s: %s", path.name, exc)
 
         return None, ""
+
+    def _mdls_capture_date(self, path: Path) -> tuple[Optional[datetime], str]:
+        """
+        Use macOS Spotlight metadata as a fallback for formats like CR3/MP4.
+
+        We prefer explicit content/media creation dates before filesystem times.
+        """
+        for key, source_label in (
+            ("kMDItemContentCreationDate", "mdls_content_creation"),
+            ("kMDItemMediaCreationDate", "mdls_media_creation"),
+        ):
+            dt = self._mdls_value(path, key)
+            if dt:
+                return dt, source_label
+        return None, ""
+
+    def _mdls_value(self, path: Path, key: str) -> Optional[datetime]:
+        try:
+            result = subprocess.run(
+                ["mdls", "-name", key, "-raw", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            log.debug("mdls unavailable for %s: %s", path.name, exc)
+            return None
+
+        if result.returncode != 0:
+            return None
+
+        raw = result.stdout.strip()
+        if not raw or raw == "(null)":
+            return None
+
+        for fmt in _MDLS_DT_FMTS:
+            try:
+                parsed = datetime.strptime(raw, fmt)
+                return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+            except ValueError:
+                continue
+
+        log.debug("Unparseable mdls date for %s (%s): %s", path.name, key, raw)
+        return None
 
     @staticmethod
     def _parse_exif_dt(raw: str) -> Optional[datetime]:

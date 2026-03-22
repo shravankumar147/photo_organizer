@@ -3,9 +3,9 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `11b29e9` `show elapsed time in summary`
+- Latest local commit: working tree with capture-time priority update
 - Latest remote commit: `31f9bed` `bucket media files by type`
-- Test status: `.venv/bin/pytest -q` passing (`30 passed`)
+- Test status: `.venv/bin/pytest -q` passing (`33 passed`)
 
 ## Progress Log
 
@@ -25,6 +25,7 @@
 - Added post-run cleanup to remove empty source directories after files are organized.
 - Switched the output layout to `YYYY/MM/DD/images|raw|videos/` for date-first browsing.
 - Added total elapsed time to the run summary and returned stats.
+- Tightened date extraction to prefer camera capture metadata before filesystem timestamps.
 
 ## Next Step
 
