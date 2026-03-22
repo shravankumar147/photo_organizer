@@ -3,7 +3,7 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: working tree with invalid-date guardrails
+- Latest local commit: `6a2d003` `reject bogus epoch capture dates`
 - Latest remote commit: `31f9bed` `bucket media files by type`
 - Test status: `.venv/bin/pytest -q` passing (`35 passed`)
 
