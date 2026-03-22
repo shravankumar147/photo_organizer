@@ -3,7 +3,7 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: working tree with package-level workflow modules
+- Latest local commit: `a3beeaa` `move workflow scripts into package`
 - Latest remote commit: `31f9bed` `bucket media files by type`
 - Test status: `.venv/bin/pytest -q` passing (`40 passed`)
 
