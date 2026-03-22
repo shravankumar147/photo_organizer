@@ -21,6 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from copy_media_for_cloud import copy_for_cloud
+from ftp_upload import upload_to_ftp
 from photo_organizer.metadata import ImageMetadata, MetadataExtractor
 from photo_organizer.main import remove_empty_directories
 from photo_organizer.organizer import Organizer, OrganizerConfig
@@ -583,3 +584,62 @@ class TestCloudCopy:
 
         assert stats == {"copied": 1, "skipped": 0, "errors": 0}
         assert not dst.exists()
+
+
+class FakeFTP:
+    def __init__(self):
+        self.cwd_calls: list[str] = []
+        self.mkd_calls: list[str] = []
+        self.stor_calls: list[str] = []
+
+    def cwd(self, path: str) -> None:
+        self.cwd_calls.append(path)
+
+    def mkd(self, path: str) -> None:
+        self.mkd_calls.append(path)
+
+    def storbinary(self, command: str, fh) -> None:
+        fh.read()
+        self.stor_calls.append(command)
+
+
+class TestFtpUpload:
+    def test_upload_moves_file_to_trash(self, tmp_path: Path):
+        src_root = tmp_path / "cloud_ready"
+        trash_root = tmp_path / "ftp_trash"
+        image = src_root / "2024" / "07" / "04" / "images" / "shot.jpg"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"jpeg")
+        ftp = FakeFTP()
+
+        stats = upload_to_ftp(
+            source_root=src_root,
+            trash_root=trash_root,
+            ftp=ftp,
+            remote_root="/photos",
+            dry_run=False,
+        )
+
+        assert stats == {"uploaded": 1, "skipped": 0, "errors": 0}
+        assert ftp.stor_calls == ["STOR shot.jpg"]
+        assert not image.exists()
+        assert (trash_root / "2024" / "07" / "04" / "images" / "shot.jpg").exists()
+
+    def test_dry_run_does_not_move_or_upload(self, tmp_path: Path):
+        src_root = tmp_path / "cloud_ready"
+        trash_root = tmp_path / "ftp_trash"
+        image = src_root / "2024" / "07" / "04" / "images" / "shot.jpg"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"jpeg")
+
+        stats = upload_to_ftp(
+            source_root=src_root,
+            trash_root=trash_root,
+            ftp=None,
+            remote_root="/photos",
+            dry_run=True,
+        )
+
+        assert stats == {"uploaded": 1, "skipped": 0, "errors": 0}
+        assert image.exists()
+        assert not trash_root.exists()

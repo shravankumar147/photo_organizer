@@ -3,9 +3,9 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `bc88bbe` `add cloud-ready media copy script`
+- Latest local commit: working tree with ftp upload script
 - Latest remote commit: `31f9bed` `bucket media files by type`
-- Test status: `.venv/bin/pytest -q` passing (`38 passed`)
+- Test status: `.venv/bin/pytest -q` passing (`40 passed`)
 
 ## Progress Log
 
@@ -30,6 +30,8 @@
 - Added a `copy_media_for_cloud.py` helper to copy only image assets from the organized tree.
 - Filtered hidden trash and AppleDouble files out of the cloud-copy set.
 - Ran `copy_media_for_cloud.py` successfully and copied 61 image files into `cloud_ready/`.
+- Added `ftp_upload.py` to upload cloud-ready images and move successful uploads into local FTP trash.
+- Could not run the real FTP upload yet because `FTP_HOST`, `FTP_USER`, and `FTP_PASSWORD` are not set in the environment.
 
 ## Next Step
 
