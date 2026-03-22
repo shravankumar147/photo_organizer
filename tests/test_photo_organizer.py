@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from photo_organizer.cloud_copy import copy_for_cloud
-from photo_organizer.ftp_upload import upload_to_ftp
+from photo_organizer.ftp_upload import load_config, load_dotenv, resolve_ftp_settings, upload_to_ftp
 from photo_organizer.metadata import ImageMetadata, MetadataExtractor
 from photo_organizer.main import remove_empty_directories
 from photo_organizer.organizer import Organizer, OrganizerConfig
@@ -604,6 +604,63 @@ class FakeFTP:
 
 
 class TestFtpUpload:
+    def test_load_dotenv_reads_ftp_values(self, tmp_path: Path):
+        env_file = tmp_path / ".env"
+        env_file.write_text("FTP_HOST=example.com\nFTP_USER=alice\nFTP_PASS=secret\n", encoding="utf-8")
+
+        values = load_dotenv(env_file)
+
+        assert values["FTP_HOST"] == "example.com"
+        assert values["FTP_USER"] == "alice"
+        assert values["FTP_PASS"] == "secret"
+
+    def test_load_config_reads_ftp_section(self, tmp_path: Path):
+        config_file = tmp_path / "config.yaml"
+        config_file.write_text(
+            "ftp:\n"
+            "  local_folder: /photos\n"
+            "  remote_folder: /remote\n"
+            "  use_env_credentials: true\n",
+            encoding="utf-8",
+        )
+
+        config = load_config(config_file)
+
+        assert config["ftp"]["local_folder"] == "/photos"
+        assert config["ftp"]["remote_folder"] == "/remote"
+        assert config["ftp"]["use_env_credentials"] is True
+
+    def test_resolve_ftp_settings_uses_env_credentials(self, tmp_path: Path):
+        env_file = tmp_path / ".env"
+        config_file = tmp_path / "config.yaml"
+        env_file.write_text("FTP_HOST=env.example\nFTP_USER=env-user\nFTP_PASS=env-pass\n", encoding="utf-8")
+        config_file.write_text(
+            "ftp:\n"
+            "  local_folder: /photos\n"
+            "  remote_folder: /remote\n"
+            "  use_env_credentials: true\n",
+            encoding="utf-8",
+        )
+
+        args = MagicMock(
+            src=None,
+            trash=None,
+            host=None,
+            user=None,
+            password=None,
+            remote_root=None,
+            port=None,
+            env_file=str(env_file),
+            config=str(config_file),
+        )
+
+        settings = resolve_ftp_settings(args)
+
+        assert settings["host"] == "env.example"
+        assert settings["user"] == "env-user"
+        assert settings["password"] == "env-pass"
+        assert settings["remote_root"] == "/remote"
+
     def test_upload_moves_file_to_trash(self, tmp_path: Path):
         src_root = tmp_path / "cloud_ready"
         trash_root = tmp_path / "ftp_trash"

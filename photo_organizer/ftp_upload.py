@@ -6,10 +6,13 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 DEFAULT_SOURCE = Path("/Volumes/EOS_DIGITAL/DCIM/100CANON/cloud_ready")
 DEFAULT_TRASH = Path("/Volumes/EOS_DIGITAL/DCIM/100CANON/ftp_trash")
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic"}
+DEFAULT_ENV_FILE = Path(".env")
+DEFAULT_CONFIG_FILE = Path("config.yaml")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -22,18 +25,111 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--src", default=str(DEFAULT_SOURCE), metavar="PATH", help="Source cloud-ready directory.")
     parser.add_argument("--trash", default=str(DEFAULT_TRASH), metavar="PATH", help="Local trash directory for successfully uploaded files.")
-    parser.add_argument("--host", default=os.environ.get("FTP_HOST"), help="FTP host. Defaults to FTP_HOST.")
-    parser.add_argument("--user", default=os.environ.get("FTP_USER"), help="FTP username. Defaults to FTP_USER.")
-    parser.add_argument("--password", default=os.environ.get("FTP_PASSWORD"), help="FTP password. Defaults to FTP_PASSWORD.")
+    parser.add_argument("--host", default=None, help="FTP host.")
+    parser.add_argument("--user", default=None, help="FTP username.")
+    parser.add_argument("--password", default=None, help="FTP password.")
     parser.add_argument(
         "--remote-root",
-        default=os.environ.get("FTP_REMOTE_ROOT", "/"),
+        default=None,
         metavar="PATH",
-        help="Remote FTP root. Defaults to FTP_REMOTE_ROOT or '/'.",
+        help="Remote FTP root.",
     )
-    parser.add_argument("--port", default=int(os.environ.get("FTP_PORT", "21")), type=int, help="FTP port. Defaults to FTP_PORT or 21.")
+    parser.add_argument("--port", default=None, type=int, help="FTP port.")
+    parser.add_argument("--env-file", default=str(DEFAULT_ENV_FILE), metavar="PATH", help="Optional .env file with FTP credentials.")
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG_FILE), metavar="PATH", help="Optional config.yaml file.")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be uploaded without writing files or moving local files.")
     return parser
+
+
+def _parse_value(raw: str) -> Any:
+    value = raw.strip().strip("'\"")
+    lowered = value.lower()
+    if lowered in {"true", "false"}:
+        return lowered == "true"
+    if value.isdigit():
+        return int(value)
+    return value
+
+
+def load_dotenv(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.exists():
+        return values
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw = stripped.split("=", 1)
+        values[key.strip()] = str(_parse_value(raw))
+    return values
+
+
+def load_config(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+
+    try:
+        import yaml  # type: ignore
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return data if isinstance(data, dict) else {}
+    except ImportError:
+        pass
+
+    data: dict[str, Any] = {}
+    current_section: str | None = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if not line.startswith(" ") and stripped.endswith(":"):
+            current_section = stripped[:-1]
+            data[current_section] = {}
+            continue
+        if current_section and ":" in stripped:
+            key, raw = stripped.split(":", 1)
+            section = data.setdefault(current_section, {})
+            if isinstance(section, dict):
+                section[key.strip()] = _parse_value(raw)
+    return data
+
+
+def resolve_ftp_settings(args: argparse.Namespace) -> dict[str, Any]:
+    env_values = load_dotenv(Path(args.env_file))
+    config = load_config(Path(args.config))
+    ftp_config = config.get("ftp", {}) if isinstance(config.get("ftp", {}), dict) else {}
+
+    use_env_credentials = bool(ftp_config.get("use_env_credentials", True))
+
+    host = args.host or env_values.get("FTP_HOST") or ftp_config.get("host")
+    user = args.user or env_values.get("FTP_USER") or ftp_config.get("user")
+    password = (
+        args.password
+        or env_values.get("FTP_PASSWORD")
+        or env_values.get("FTP_PASS")
+        or ftp_config.get("password")
+        or ftp_config.get("pass")
+    )
+    if not use_env_credentials:
+        user = args.user or ftp_config.get("user") or env_values.get("FTP_USER")
+        password = (
+            args.password
+            or ftp_config.get("password")
+            or ftp_config.get("pass")
+            or env_values.get("FTP_PASSWORD")
+            or env_values.get("FTP_PASS")
+        )
+
+    return {
+        "source_root": Path(args.src or ftp_config.get("local_folder", DEFAULT_SOURCE)),
+        "trash_root": Path(args.trash or ftp_config.get("trash_folder", DEFAULT_TRASH)),
+        "host": host,
+        "user": user,
+        "password": password,
+        "remote_root": args.remote_root or ftp_config.get("remote_folder") or env_values.get("FTP_REMOTE_ROOT") or "/",
+        "port": args.port or int(env_values.get("FTP_PORT", ftp_config.get("port", 21))),
+    }
 
 
 def iter_upload_candidates(root: Path) -> list[Path]:
@@ -113,17 +209,20 @@ def upload_to_ftp(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    source_root = Path(args.src)
-    trash_root = Path(args.trash)
+    settings = resolve_ftp_settings(args)
+    source_root = settings["source_root"]
+    trash_root = settings["trash_root"]
 
     if not source_root.exists():
         print(f"[error] Source directory does not exist: {source_root}", file=sys.stderr)
         return 1
 
-    if not args.dry_run and (not args.host or not args.user or not args.password):
+    if not args.dry_run and (
+        not settings["host"] or not settings["user"] or not settings["password"]
+    ):
         print(
-            "[error] FTP credentials are required. Set FTP_HOST, FTP_USER, "
-            "FTP_PASSWORD, or pass --host/--user/--password.",
+            "[error] FTP credentials are required. Set them in .env, config.yaml, "
+            "or pass --host/--user/--password.",
             file=sys.stderr,
         )
         return 1
@@ -132,14 +231,14 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not args.dry_run:
             ftp = ftplib.FTP()
-            ftp.connect(args.host, args.port)
-            ftp.login(args.user, args.password)
+            ftp.connect(settings["host"], settings["port"])
+            ftp.login(settings["user"], settings["password"])
 
         stats = upload_to_ftp(
             source_root=source_root,
             trash_root=trash_root,
             ftp=ftp,
-            remote_root=args.remote_root,
+            remote_root=settings["remote_root"],
             dry_run=args.dry_run,
         )
     finally:

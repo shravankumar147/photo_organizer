@@ -7,3 +7,11 @@ htmlcov/
 .DS_Store
 README.html
 README_files/
+.env
+config.yaml
+*.pem
+*.key
+*.crt
+*.csr
+credentials.json
+*.log

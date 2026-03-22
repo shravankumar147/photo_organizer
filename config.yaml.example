@@ -1,0 +1,9 @@
+ftp:
+  local_folder: "/Volumes/EOS_DIGITAL/DCIM/100CANON/cloud_ready"
+  remote_folder: "/path/on/ftp/server"
+  trash_folder: "/Volumes/EOS_DIGITAL/DCIM/100CANON/ftp_trash"
+  use_env_credentials: true
+  host: "your.ftp.server"
+  user: "your_username"
+  pass: "your_password"
+  port: 21

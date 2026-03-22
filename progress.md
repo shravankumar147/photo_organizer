@@ -3,9 +3,9 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `a3beeaa` `move workflow scripts into package`
+- Latest local commit: working tree with config file support
 - Latest remote commit: `31f9bed` `bucket media files by type`
-- Test status: `.venv/bin/pytest -q` passing (`40 passed`)
+- Test status: `.venv/bin/pytest -q` passing (`43 passed`)
 
 ## Progress Log
 
@@ -33,6 +33,7 @@
 - Added `ftp_upload.py` to upload cloud-ready images and move successful uploads into local FTP trash.
 - Could not run the real FTP upload yet because `FTP_HOST`, `FTP_USER`, and `FTP_PASSWORD` are not set in the environment.
 - Moved cloud copy and FTP upload logic into package modules and added a package workflow runner.
+- Added `.env.example`, `config.yaml.example`, and uploader support for loading FTP settings from them.
 
 ## Next Step
 
