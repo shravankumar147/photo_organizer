@@ -3,9 +3,9 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `6a2d003` `reject bogus epoch capture dates`
+- Latest local commit: working tree with cloud-copy script
 - Latest remote commit: `31f9bed` `bucket media files by type`
-- Test status: `.venv/bin/pytest -q` passing (`35 passed`)
+- Test status: `.venv/bin/pytest -q` passing (`38 passed`)
 
 ## Progress Log
 
@@ -27,6 +27,9 @@
 - Added total elapsed time to the run summary and returned stats.
 - Tightened date extraction to prefer camera capture metadata before filesystem timestamps.
 - Added guardrails to reject bogus epoch-style dates like `1970-01-01`.
+- Added a `copy_media_for_cloud.py` helper to copy only image assets from the organized tree.
+- Filtered hidden trash and AppleDouble files out of the cloud-copy set.
+- Ran `copy_media_for_cloud.py` successfully and copied 61 image files into `cloud_ready/`.
 
 ## Next Step
 

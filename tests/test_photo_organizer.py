@@ -20,6 +20,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from copy_media_for_cloud import copy_for_cloud
 from photo_organizer.metadata import ImageMetadata, MetadataExtractor
 from photo_organizer.main import remove_empty_directories
 from photo_organizer.organizer import Organizer, OrganizerConfig
@@ -529,3 +530,56 @@ class TestUtils:
         output = capsys.readouterr().out
         assert "Total files scanned : 4" in output
         assert "Total time          : 1.23s" in output
+
+
+class TestCloudCopy:
+    def test_copies_only_images_bucket(self, tmp_path: Path):
+        src = tmp_path / "organized"
+        dst = tmp_path / "cloud"
+        image = src / "2024" / "07" / "04" / "images" / "shot.jpg"
+        raw = src / "2024" / "07" / "04" / "raw" / "shot.CR3"
+        video = src / "2024" / "07" / "04" / "videos" / "clip.mp4"
+        image.parent.mkdir(parents=True)
+        raw.parent.mkdir(parents=True)
+        video.parent.mkdir(parents=True)
+        image.write_bytes(b"jpeg")
+        raw.write_bytes(b"raw")
+        video.write_bytes(b"mp4")
+
+        stats = copy_for_cloud(src, dst, dry_run=False)
+
+        assert stats == {"copied": 1, "skipped": 0, "errors": 0}
+        assert (dst / "2024" / "07" / "04" / "images" / "shot.jpg").exists()
+        assert not (dst / "2024" / "07" / "04" / "raw" / "shot.CR3").exists()
+        assert not (dst / "2024" / "07" / "04" / "videos" / "clip.mp4").exists()
+
+    def test_skips_hidden_trash_and_appledouble_files(self, tmp_path: Path):
+        src = tmp_path / "organized"
+        dst = tmp_path / "cloud"
+        hidden = src / ".trash" / "2024" / "07" / "04" / "images" / "shot.jpg"
+        appledouble = src / "2024" / "07" / "04" / "images" / "._shot.jpg"
+        real = src / "2024" / "07" / "04" / "images" / "shot.jpg"
+        hidden.parent.mkdir(parents=True)
+        appledouble.parent.mkdir(parents=True, exist_ok=True)
+        hidden.write_bytes(b"hidden")
+        appledouble.write_bytes(b"meta")
+        real.write_bytes(b"jpeg")
+
+        stats = copy_for_cloud(src, dst, dry_run=False)
+
+        assert stats == {"copied": 1, "skipped": 0, "errors": 0}
+        assert (dst / "2024" / "07" / "04" / "images" / "shot.jpg").exists()
+        assert not (dst / ".trash").exists()
+        assert not (dst / "2024" / "07" / "04" / "images" / "._shot.jpg").exists()
+
+    def test_dry_run_does_not_copy_files(self, tmp_path: Path):
+        src = tmp_path / "organized"
+        dst = tmp_path / "cloud"
+        image = src / "2024" / "07" / "04" / "images" / "shot.jpg"
+        image.parent.mkdir(parents=True)
+        image.write_bytes(b"jpeg")
+
+        stats = copy_for_cloud(src, dst, dry_run=True)
+
+        assert stats == {"copied": 1, "skipped": 0, "errors": 0}
+        assert not dst.exists()
