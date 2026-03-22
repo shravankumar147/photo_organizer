@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Any
 
 DEFAULT_SOURCE = Path("/Volumes/EOS_DIGITAL/DCIM/100CANON/cloud_ready")
@@ -13,6 +14,7 @@ DEFAULT_TRASH = Path("/Volumes/EOS_DIGITAL/DCIM/100CANON/ftp_trash")
 SUPPORTED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic"}
 DEFAULT_ENV_FILE = Path(".env")
 DEFAULT_CONFIG_FILE = Path("config.yaml")
+FTP_ERRORS = ftplib.all_errors + (OSError,)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +51,25 @@ def _parse_value(raw: str) -> Any:
     if value.isdigit():
         return int(value)
     return value
+
+
+def resolve_env_placeholders(value: Any, env_values: dict[str, str]) -> Any:
+    if not isinstance(value, str):
+        return value
+    if value.startswith("${env:") and value.endswith("}"):
+        key = value[6:-1]
+        return env_values.get(key, os.environ.get(key, value))
+    return value
+
+
+def normalize_ftp_host(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if "://" not in stripped:
+        return stripped
+    parsed = urlparse(stripped)
+    return parsed.hostname or stripped
 
 
 def load_dotenv(path: Path) -> dict[str, str]:
@@ -101,8 +122,20 @@ def resolve_ftp_settings(args: argparse.Namespace) -> dict[str, Any]:
     ftp_config = config.get("ftp", {}) if isinstance(config.get("ftp", {}), dict) else {}
 
     use_env_credentials = bool(ftp_config.get("use_env_credentials", True))
+    local_folder = resolve_env_placeholders(
+        ftp_config.get("local_folder", DEFAULT_SOURCE),
+        env_values,
+    )
+    trash_folder = resolve_env_placeholders(
+        ftp_config.get("trash_folder", DEFAULT_TRASH),
+        env_values,
+    )
+    remote_folder = resolve_env_placeholders(
+        ftp_config.get("remote_folder"),
+        env_values,
+    )
 
-    host = args.host or env_values.get("FTP_HOST") or ftp_config.get("host")
+    host = normalize_ftp_host(args.host or env_values.get("FTP_HOST") or ftp_config.get("host"))
     user = args.user or env_values.get("FTP_USER") or ftp_config.get("user")
     password = (
         args.password
@@ -122,12 +155,12 @@ def resolve_ftp_settings(args: argparse.Namespace) -> dict[str, Any]:
         )
 
     return {
-        "source_root": Path(args.src or ftp_config.get("local_folder", DEFAULT_SOURCE)),
-        "trash_root": Path(args.trash or ftp_config.get("trash_folder", DEFAULT_TRASH)),
+        "source_root": Path(args.src or local_folder),
+        "trash_root": Path(args.trash or trash_folder),
         "host": host,
         "user": user,
         "password": password,
-        "remote_root": args.remote_root or ftp_config.get("remote_folder") or env_values.get("FTP_REMOTE_ROOT") or "/",
+        "remote_root": args.remote_root or remote_folder or env_values.get("FTP_REMOTE_ROOT") or "/",
         "port": args.port or int(env_values.get("FTP_PORT", ftp_config.get("port", 21))),
     }
 
@@ -152,10 +185,12 @@ def ensure_remote_dirs(ftp: ftplib.FTP, remote_dir: str) -> None:
         return
     for part in [segment for segment in remote_dir.strip("/").split("/") if segment]:
         try:
-            ftp.mkd(part)
+            ftp.cwd(part)
+            continue
         except ftplib.error_perm as exc:
             if not str(exc).startswith("550"):
                 raise
+        ftp.mkd(part)
         ftp.cwd(part)
 
 
@@ -200,7 +235,7 @@ def upload_to_ftp(
             trash_path = move_to_trash(source_root, trash_root, src)
             stats["uploaded"] += 1
             print(f"[ok] {src} -> {remote_path} (moved to {trash_path})")
-        except (OSError, ftplib.all_errors) as exc:
+        except FTP_ERRORS as exc:
             stats["errors"] += 1
             print(f"[error] {src} -> {remote_path}: {exc}", file=sys.stderr)
 
@@ -228,11 +263,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     ftp: ftplib.FTP | None = None
+    connected = False
     try:
         if not args.dry_run:
             ftp = ftplib.FTP()
             ftp.connect(settings["host"], settings["port"])
             ftp.login(settings["user"], settings["password"])
+            connected = True
 
         stats = upload_to_ftp(
             source_root=source_root,
@@ -244,7 +281,10 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if ftp is not None:
             try:
-                ftp.quit()
+                if connected:
+                    ftp.quit()
+                else:
+                    ftp.close()
             except ftplib.all_errors:
                 ftp.close()
 

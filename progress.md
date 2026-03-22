@@ -3,9 +3,9 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `b65851a` `add ftp config file support`
+- Latest local commit: working tree with FTP live-test fixes
 - Latest remote commit: `31f9bed` `bucket media files by type`
-- Test status: `.venv/bin/pytest -q` passing (`43 passed`)
+- Test status: `.venv/bin/pytest -q` passing (`45 passed`)
 
 ## Progress Log
 
@@ -34,6 +34,8 @@
 - Could not run the real FTP upload yet because `FTP_HOST`, `FTP_USER`, and `FTP_PASSWORD` are not set in the environment.
 - Moved cloud copy and FTP upload logic into package modules and added a package workflow runner.
 - Added `.env.example`, `config.yaml.example`, and uploader support for loading FTP settings from them.
+- Live FTP testing reached the server successfully but `/backup` returned `550 Permission denied`.
+- Fixed FTP host normalization for `ftp://...` values and hardened connection/error handling.
 
 ## Next Step
 

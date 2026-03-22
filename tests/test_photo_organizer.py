@@ -21,7 +21,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from photo_organizer.cloud_copy import copy_for_cloud
-from photo_organizer.ftp_upload import load_config, load_dotenv, resolve_ftp_settings, upload_to_ftp
+from photo_organizer.ftp_upload import (
+    load_config,
+    load_dotenv,
+    normalize_ftp_host,
+    resolve_env_placeholders,
+    resolve_ftp_settings,
+    upload_to_ftp,
+)
 from photo_organizer.metadata import ImageMetadata, MetadataExtractor
 from photo_organizer.main import remove_empty_directories
 from photo_organizer.organizer import Organizer, OrganizerConfig
@@ -633,10 +640,16 @@ class TestFtpUpload:
     def test_resolve_ftp_settings_uses_env_credentials(self, tmp_path: Path):
         env_file = tmp_path / ".env"
         config_file = tmp_path / "config.yaml"
-        env_file.write_text("FTP_HOST=env.example\nFTP_USER=env-user\nFTP_PASS=env-pass\n", encoding="utf-8")
+        env_file.write_text(
+            "FTP_HOST=env.example\n"
+            "FTP_USER=env-user\n"
+            "FTP_PASS=env-pass\n"
+            "PIC_DEST=/photos\n",
+            encoding="utf-8",
+        )
         config_file.write_text(
             "ftp:\n"
-            "  local_folder: /photos\n"
+            "  local_folder: ${env:PIC_DEST}\n"
             "  remote_folder: /remote\n"
             "  use_env_credentials: true\n",
             encoding="utf-8",
@@ -659,7 +672,16 @@ class TestFtpUpload:
         assert settings["host"] == "env.example"
         assert settings["user"] == "env-user"
         assert settings["password"] == "env-pass"
+        assert settings["source_root"] == Path("/photos")
         assert settings["remote_root"] == "/remote"
+
+    def test_resolve_env_placeholders_uses_dotenv_values(self):
+        value = resolve_env_placeholders("${env:PIC_DEST}", {"PIC_DEST": "/organized"})
+        assert value == "/organized"
+
+    def test_normalize_ftp_host_strips_scheme(self):
+        assert normalize_ftp_host("ftp://192.168.0.1") == "192.168.0.1"
+        assert normalize_ftp_host("192.168.0.1") == "192.168.0.1"
 
     def test_upload_moves_file_to_trash(self, tmp_path: Path):
         src_root = tmp_path / "cloud_ready"
