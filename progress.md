@@ -3,7 +3,7 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: working tree with capture-time priority update
+- Latest local commit: `5c70e04` `prefer capture metadata over file timestamps`
 - Latest remote commit: `31f9bed` `bucket media files by type`
 - Test status: `.venv/bin/pytest -q` passing (`33 passed`)
 
