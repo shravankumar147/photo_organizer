@@ -43,6 +43,7 @@ _MDLS_DT_FMTS = (
     "%Y-%m-%d %H:%M:%S %z",
     "%Y-%m-%d %H:%M:%S",
 )
+_MIN_REASONABLE_YEAR = 1990
 
 
 @dataclass
@@ -114,11 +115,16 @@ class MetadataExtractor:
         Parse EXIF without decoding the full image.
 
         We attempt two strategies in order:
-          A) Pillow _getexif() — handles JPEG/TIFF/HEIC wrappers cleanly.
-          B) Minimal TIFF/EXIF parser — fallback when Pillow is absent.
+          A) CR3-specific exifread path when available.
+          B) Pillow _getexif() — handles JPEG/TIFF/HEIC wrappers cleanly.
         """
+        if path.suffix.lower() == ".cr3":
+            cr3_date = self._cr3_exif_date(path)
+            if cr3_date[0]:
+                return cr3_date
+
         try:
-            from PIL import Image, ExifTags  # type: ignore
+            from PIL import Image  # type: ignore
 
             with Image.open(path) as img:
                 # `_getexif()` exists only on JpegImageFile; others expose
@@ -148,6 +154,33 @@ class MetadataExtractor:
 
         except Exception as exc:  # noqa: BLE001 — intentionally broad
             log.debug("EXIF extraction failed for %s: %s", path.name, exc)
+
+        return None, ""
+
+    def _cr3_exif_date(self, path: Path) -> tuple[Optional[datetime], str]:
+        """Read CR3 capture timestamps with exifread when available."""
+        try:
+            import exifread  # type: ignore
+        except ImportError:
+            return None, ""
+
+        try:
+            with path.open("rb") as fh:
+                tags = exifread.process_file(fh, stop_tag="EXIF DateTimeOriginal", details=False)
+        except OSError as exc:
+            log.debug("CR3 EXIF extraction failed for %s: %s", path.name, exc)
+            return None, ""
+
+        for key, source_label in (
+            ("EXIF DateTimeOriginal", "exif_original"),
+            ("EXIF DateTimeDigitized", "exif_digitized"),
+            ("Image DateTime", "exif_datetime"),
+        ):
+            raw_val = tags.get(key)
+            if raw_val:
+                dt = self._parse_exif_dt(str(raw_val))
+                if dt:
+                    return dt, source_label
 
         return None, ""
 
@@ -188,7 +221,8 @@ class MetadataExtractor:
         for fmt in _MDLS_DT_FMTS:
             try:
                 parsed = datetime.strptime(raw, fmt)
-                return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+                normalized = parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+                return normalized if self._is_reasonable_date(normalized) else None
             except ValueError:
                 continue
 
@@ -199,7 +233,8 @@ class MetadataExtractor:
     def _parse_exif_dt(raw: str) -> Optional[datetime]:
         """Parse EXIF datetime string, returning None on any parse error."""
         try:
-            return datetime.strptime(raw.strip(), _EXIF_DT_FMT)
+            parsed = datetime.strptime(raw.strip(), _EXIF_DT_FMT)
+            return parsed if MetadataExtractor._is_reasonable_date(parsed) else None
         except ValueError:
             return None
 
@@ -210,7 +245,8 @@ class MetadataExtractor:
             st = path.stat()
             birth_ts = getattr(st, "st_birthtime", None)
             if birth_ts:
-                return datetime.fromtimestamp(birth_ts)
+                parsed = datetime.fromtimestamp(birth_ts)
+                return parsed if MetadataExtractor._is_reasonable_date(parsed) else None
         except OSError:
             pass
         return None
@@ -219,6 +255,12 @@ class MetadataExtractor:
     def _mtime_date(path: Path) -> Optional[datetime]:
         """Return file modification time."""
         try:
-            return datetime.fromtimestamp(path.stat().st_mtime)
+            parsed = datetime.fromtimestamp(path.stat().st_mtime)
+            return parsed if MetadataExtractor._is_reasonable_date(parsed) else None
         except OSError:
             return None
+
+    @staticmethod
+    def _is_reasonable_date(dt: datetime) -> bool:
+        now = datetime.now()
+        return _MIN_REASONABLE_YEAR <= dt.year <= now.year + 1

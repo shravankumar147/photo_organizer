@@ -228,6 +228,20 @@ class TestMetadataExtractor:
 
         assert dt == datetime(2024, 7, 15, 14, 30, 0)
 
+    def test_rejects_epoch_like_mdls_date(self, tmp_src: Path):
+        img = _touch(tmp_src, "clip.mp4")
+        extractor = MetadataExtractor()
+
+        with patch("photo_organizer.metadata.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="1970-01-01 00:00:00 +0000\n")
+            dt = extractor._mdls_value(img, "kMDItemMediaCreationDate")
+
+        assert dt is None
+
+    def test_rejects_epoch_like_exif_date(self):
+        extractor = MetadataExtractor()
+        assert extractor._parse_exif_dt("1970:01:01 00:00:00") is None
+
     def test_metadata_dataclass_fields(self, tmp_src: Path):
         img = _touch(tmp_src, "x.png")
         meta = MetadataExtractor().extract(img)

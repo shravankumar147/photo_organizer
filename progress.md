@@ -3,9 +3,9 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: `5c70e04` `prefer capture metadata over file timestamps`
+- Latest local commit: working tree with invalid-date guardrails
 - Latest remote commit: `31f9bed` `bucket media files by type`
-- Test status: `.venv/bin/pytest -q` passing (`33 passed`)
+- Test status: `.venv/bin/pytest -q` passing (`35 passed`)
 
 ## Progress Log
 
@@ -26,6 +26,7 @@
 - Switched the output layout to `YYYY/MM/DD/images|raw|videos/` for date-first browsing.
 - Added total elapsed time to the run summary and returned stats.
 - Tightened date extraction to prefer camera capture metadata before filesystem timestamps.
+- Added guardrails to reject bogus epoch-style dates like `1970-01-01`.
 
 ## Next Step
 
