@@ -1,0 +1,32 @@
+app:
+  environment: "production"
+  log_level: "INFO"
+
+audit:
+  folder: "run_logs"
+
+storage:
+  source_folder: "/Volumes/EOS_DIGITAL/DCIM/100CANON"
+  destination_folder: "/Volumes/EOS_DIGITAL/DCIM/100CANON/organized"
+
+network_backup:
+  enabled: true
+  source_folder: "/Volumes/EOS_DIGITAL/DCIM/100CANON/organized"
+  destination_folder: "/Volumes/tp-share/Canon EOS M50/DCIM"
+  trash_folder: "/Volumes/EOS_DIGITAL/DCIM/100CANON/network_backup_trash"
+
+cloud:
+  enabled: true
+  source_folder: "/Volumes/EOS_DIGITAL/DCIM/100CANON/organized"
+  destination_folder: "/Users/shravan/Pictures"
+
+ftp:
+  enabled: false
+  use_env_credentials: true
+  host: "${oc.env:FTP_HOST,''}"
+  user: "${oc.env:FTP_USER,''}"
+  password: "${oc.env:FTP_PASS,''}"
+  source_folder: "/Volumes/EOS_DIGITAL/DCIM/100CANON/organized"
+  remote_folder: "${oc.env:FTP_REMOTE_ROOT,'/G/ftp_uploads'}"
+  trash_folder: "/Volumes/EOS_DIGITAL/DCIM/100CANON/ftp_trash"
+  port: "${oc.env:FTP_PORT,21}"

@@ -11,29 +11,27 @@ Full test suite covering:
 
 from __future__ import annotations
 
+import sys
+import os
 import shutil
 import struct
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 
 from photo_organizer.cloud_copy import copy_for_cloud
-from photo_organizer.ftp_upload import (
-    load_config,
-    load_dotenv,
-    normalize_ftp_host,
-    resolve_env_placeholders,
-    resolve_ftp_settings,
-    upload_to_ftp,
-)
+from photo_organizer.config import load_dotenv_into_environ, load_settings
+from photo_organizer.ftp_upload import normalize_ftp_host, resolve_ftp_settings, upload_to_ftp
 from photo_organizer.metadata import ImageMetadata, MetadataExtractor
-from photo_organizer.main import remove_empty_directories
+from photo_organizer.main import managed_roots, remove_empty_directories
+from photo_organizer.network_backup import backup_to_network
 from photo_organizer.organizer import Organizer, OrganizerConfig
 from photo_organizer.scanner import Scanner
 from photo_organizer.utils import print_summary
+from photo_organizer.workflow import WorkflowStepError, main as workflow_main, run_step
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -424,6 +422,14 @@ class TestOrganizer:
 
 
 class TestIntegration:
+    def test_managed_roots_include_known_output_directories(self, tmp_src: Path):
+        organized = tmp_src / "organized"
+        roots = managed_roots(tmp_src, organized)
+        assert organized.resolve(strict=False) in roots
+        assert (tmp_src / "ftp_trash").resolve(strict=False) in roots
+        assert (tmp_src / "cloud_ready").resolve(strict=False) in roots
+        assert (tmp_src / "network_backup_trash").resolve(strict=False) in roots
+
     def test_end_to_end_pipeline(self, tmp_src: Path, tmp_dst: Path):
         """Full pipeline: scanner → metadata → organizer."""
         # Create a mix of files
@@ -469,6 +475,48 @@ class TestIntegration:
         assert (organized / "2026" / "03" / "22" / "images").exists()
         assert stats["elapsed_seconds"] >= 0
 
+    def test_pipeline_skips_ftp_trash_directory(self, tmp_src: Path):
+        ftp_trash = tmp_src / "ftp_trash"
+        ftp_trash.mkdir()
+        _touch(ftp_trash, "uploaded.jpg", b"done")
+        _touch(tmp_src, "fresh.jpg", b"new")
+
+        from photo_organizer.main import OrganizeRequest, run
+
+        organized = tmp_src / "organized"
+        request = OrganizeRequest(
+            src=tmp_src,
+            dst=organized,
+            dry_run=False,
+            verbose=False,
+        )
+        stats = run(request)
+
+        assert stats["processed"] + stats["errors"] == 1
+        assert (organized / "2026" / "03" / "22" / "images" / "fresh.jpg").exists()
+        assert (ftp_trash / "uploaded.jpg").exists()
+
+    def test_pipeline_skips_network_backup_trash_directory(self, tmp_src: Path):
+        backup_trash = tmp_src / "network_backup_trash"
+        backup_trash.mkdir()
+        _touch(backup_trash, "backed_up.jpg", b"done")
+        _touch(tmp_src, "fresh.jpg", b"new")
+
+        from photo_organizer.main import OrganizeRequest, run
+
+        organized = tmp_src / "organized"
+        request = OrganizeRequest(
+            src=tmp_src,
+            dst=organized,
+            dry_run=False,
+            verbose=False,
+        )
+        stats = run(request)
+
+        assert stats["processed"] + stats["errors"] == 1
+        assert (organized / "2026" / "03" / "22" / "images" / "fresh.jpg").exists()
+        assert (backup_trash / "backed_up.jpg").exists()
+
     def test_pipeline_drops_duplicate_content_even_with_different_names(self, tmp_src: Path):
         first = _touch(tmp_src, "a.jpg", b"same")
         second = _touch(tmp_src, "b.jpg", b"same")
@@ -512,6 +560,20 @@ class TestIntegration:
         assert organized.exists()
         assert stats["elapsed_seconds"] >= 0
 
+    def test_remove_empty_directories_ignores_ds_store_files(self, tmp_src: Path):
+        dated = tmp_src / "2024" / "01"
+        dated.mkdir(parents=True)
+        _touch(tmp_src, ".DS_Store", b"junk")
+        _touch(tmp_src / "2024", ".DS_Store", b"junk")
+        _touch(dated, ".DS_Store", b"junk")
+
+        removed = remove_empty_directories(tmp_src)
+
+        assert removed == 2
+        assert not dated.exists()
+        assert not (tmp_src / "2024").exists()
+        assert (tmp_src / ".DS_Store").exists()
+
     def test_dry_run_no_files_created(self, tmp_src: Path, tmp_dst: Path):
         _touch(tmp_src, "photo.jpg", b"fake")
 
@@ -541,7 +603,7 @@ class TestUtils:
 
 
 class TestCloudCopy:
-    def test_copies_only_images_bucket(self, tmp_path: Path):
+    def test_copies_images_and_videos_but_not_raw(self, tmp_path: Path):
         src = tmp_path / "organized"
         dst = tmp_path / "cloud"
         image = src / "2024" / "07" / "04" / "images" / "shot.jpg"
@@ -556,10 +618,10 @@ class TestCloudCopy:
 
         stats = copy_for_cloud(src, dst, dry_run=False)
 
-        assert stats == {"copied": 1, "skipped": 0, "errors": 0}
+        assert stats == {"copied": 2, "skipped": 0, "errors": 0}
         assert (dst / "2024" / "07" / "04" / "images" / "shot.jpg").exists()
         assert not (dst / "2024" / "07" / "04" / "raw" / "shot.CR3").exists()
-        assert not (dst / "2024" / "07" / "04" / "videos" / "clip.mp4").exists()
+        assert (dst / "2024" / "07" / "04" / "videos" / "clip.mp4").exists()
 
     def test_skips_hidden_trash_and_appledouble_files(self, tmp_path: Path):
         src = tmp_path / "organized"
@@ -593,6 +655,89 @@ class TestCloudCopy:
         assert not dst.exists()
 
 
+class TestNetworkBackup:
+    def test_backup_copies_images_raw_and_videos(self, tmp_path: Path):
+        src = tmp_path / "organized"
+        dst = tmp_path / "share"
+        image = src / "2024" / "07" / "04" / "images" / "shot.jpg"
+        raw = src / "2024" / "07" / "04" / "raw" / "shot.CR3"
+        video = src / "2024" / "07" / "04" / "videos" / "clip.mp4"
+        image.parent.mkdir(parents=True)
+        raw.parent.mkdir(parents=True)
+        video.parent.mkdir(parents=True)
+        dst.mkdir()
+        image.write_bytes(b"jpeg")
+        raw.write_bytes(b"raw")
+        video.write_bytes(b"mp4")
+
+        stats = backup_to_network(src, dst, dry_run=False)
+
+        assert stats == {"copied": 3, "skipped": 0, "errors": 0, "pruned": 0, "empty_dirs_removed": 0}
+        assert (dst / "2024" / "07" / "04" / "images" / "shot.jpg").exists()
+        assert (dst / "2024" / "07" / "04" / "raw" / "shot.CR3").exists()
+        assert (dst / "2024" / "07" / "04" / "videos" / "clip.mp4").exists()
+
+    def test_backup_skips_identical_files(self, tmp_path: Path):
+        src = tmp_path / "organized"
+        dst = tmp_path / "share"
+        image = src / "2024" / "07" / "04" / "images" / "shot.jpg"
+        target = dst / "2024" / "07" / "04" / "images" / "shot.jpg"
+        image.parent.mkdir(parents=True)
+        target.parent.mkdir(parents=True)
+        dst.mkdir(exist_ok=True)
+        image.write_bytes(b"jpeg")
+        target.write_bytes(b"jpeg")
+
+        stats = backup_to_network(src, dst, dry_run=False)
+
+        assert stats == {"copied": 0, "skipped": 1, "errors": 0, "pruned": 0, "empty_dirs_removed": 0}
+
+    def test_prune_source_removes_files_after_successful_backup(self, tmp_path: Path):
+        src = tmp_path / "organized"
+        dst = tmp_path / "share"
+        trash = tmp_path / "network_backup_trash"
+        image = src / "2024" / "07" / "04" / "images" / "shot.jpg"
+        image.parent.mkdir(parents=True)
+        dst.mkdir()
+        image.write_bytes(b"jpeg")
+
+        stats = backup_to_network(src, dst, dry_run=False, prune_source=True, trash_root=trash)
+
+        assert stats == {"copied": 1, "skipped": 0, "errors": 0, "pruned": 1, "empty_dirs_removed": 4}
+        assert not image.exists()
+        assert not (src / "2024").exists()
+        assert (dst / "2024" / "07" / "04" / "images" / "shot.jpg").exists()
+        assert (trash / "2024" / "07" / "04" / "images" / "shot.jpg").exists()
+
+    def test_prune_source_removes_identical_skipped_files(self, tmp_path: Path):
+        src = tmp_path / "organized"
+        dst = tmp_path / "share"
+        trash = tmp_path / "network_backup_trash"
+        image = src / "2024" / "07" / "04" / "images" / "shot.jpg"
+        target = dst / "2024" / "07" / "04" / "images" / "shot.jpg"
+        image.parent.mkdir(parents=True)
+        target.parent.mkdir(parents=True)
+        image.write_bytes(b"jpeg")
+        target.write_bytes(b"jpeg")
+
+        stats = backup_to_network(src, dst, dry_run=False, prune_source=True, trash_root=trash)
+
+        assert stats == {"copied": 0, "skipped": 1, "errors": 0, "pruned": 1, "empty_dirs_removed": 4}
+        assert not image.exists()
+        assert (trash / "2024" / "07" / "04" / "images" / "shot.jpg").exists()
+
+    def test_prune_source_requires_trash_root(self, tmp_path: Path):
+        src = tmp_path / "organized"
+        dst = tmp_path / "share"
+        image = src / "2024" / "07" / "04" / "images" / "shot.jpg"
+        image.parent.mkdir(parents=True)
+        dst.mkdir()
+        image.write_bytes(b"jpeg")
+
+        with pytest.raises(ValueError, match="trash_root is required"):
+            backup_to_network(src, dst, dry_run=False, prune_source=True)
+
+
 class FakeFTP:
     def __init__(self):
         self.cwd_calls: list[str] = []
@@ -610,46 +755,121 @@ class FakeFTP:
         self.stor_calls.append(command)
 
 
+class TestWorkflow:
+    def test_run_step_passes_config_and_extra_args(self):
+        with patch("photo_organizer.workflow.subprocess.run") as run_mock:
+            run_mock.return_value.returncode = 0
+
+            run_step(
+                "photo_organizer.network_backup",
+                config_path="config.test.yaml",
+                extra_args=["--prune-source"],
+            )
+
+        run_mock.assert_called_once_with(
+            [
+                sys.executable,
+                "-m",
+                "photo_organizer.network_backup",
+                "--config",
+                "config.test.yaml",
+                "--prune-source",
+            ],
+            check=False,
+        )
+
+    def test_run_step_raises_on_failure(self):
+        with patch("photo_organizer.workflow.subprocess.run") as run_mock:
+            run_mock.return_value.returncode = 7
+
+            with pytest.raises(WorkflowStepError):
+                run_step("photo_organizer.network_backup")
+
+    def test_workflow_runs_all_steps(self):
+        with patch("photo_organizer.workflow.run_step") as run_step_mock:
+            result = workflow_main(["--config", "config.test.yaml", "--prune-source"])
+
+        assert result == 0
+        assert run_step_mock.call_args_list == [
+            call("photo_organizer", config_path="config.test.yaml"),
+            call("photo_organizer.cloud_copy", config_path="config.test.yaml"),
+            call(
+                "photo_organizer.network_backup",
+                config_path="config.test.yaml",
+                extra_args=["--prune-source"],
+            ),
+        ]
+
+    def test_workflow_uses_ftp_fallback_when_network_backup_fails(self):
+        def fake_run_step(module: str, config_path: str | None = None, extra_args: list[str] | None = None):
+            if module == "photo_organizer.network_backup":
+                raise WorkflowStepError(module, 2)
+            return None
+
+        with patch("photo_organizer.workflow.run_step", side_effect=fake_run_step) as run_step_mock:
+            result = workflow_main(["--config", "config.test.yaml", "--ftp-fallback"])
+
+        assert result == 0
+        assert [call.args[0] for call in run_step_mock.call_args_list] == [
+            "photo_organizer",
+            "photo_organizer.cloud_copy",
+            "photo_organizer.network_backup",
+            "photo_organizer.ftp_upload",
+        ]
+
+
 class TestFtpUpload:
-    def test_load_dotenv_reads_ftp_values(self, tmp_path: Path):
+    def test_load_dotenv_reads_ftp_values(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("FTP_HOST", raising=False)
+        monkeypatch.delenv("FTP_USER", raising=False)
+        monkeypatch.delenv("FTP_PASS", raising=False)
         env_file = tmp_path / ".env"
         env_file.write_text("FTP_HOST=example.com\nFTP_USER=alice\nFTP_PASS=secret\n", encoding="utf-8")
 
-        values = load_dotenv(env_file)
+        load_dotenv_into_environ(env_file)
 
-        assert values["FTP_HOST"] == "example.com"
-        assert values["FTP_USER"] == "alice"
-        assert values["FTP_PASS"] == "secret"
+        assert os.environ["FTP_HOST"] == "example.com"
+        assert os.environ["FTP_USER"] == "alice"
+        assert os.environ["FTP_PASS"] == "secret"
 
     def test_load_config_reads_ftp_section(self, tmp_path: Path):
-        config_file = tmp_path / "config.yaml"
+        default_file = tmp_path / "config.default.yaml"
+        config_file = tmp_path / "config.test.yaml"
+        default_file.write_text("", encoding="utf-8")
         config_file.write_text(
             "ftp:\n"
-            "  local_folder: /photos\n"
+            "  source_folder: /photos\n"
             "  remote_folder: /remote\n"
             "  use_env_credentials: true\n",
             encoding="utf-8",
         )
 
-        config = load_config(config_file)
+        config = load_settings(str(config_file))
 
-        assert config["ftp"]["local_folder"] == "/photos"
-        assert config["ftp"]["remote_folder"] == "/remote"
-        assert config["ftp"]["use_env_credentials"] is True
+        assert str(config.ftp.source_folder) == "/photos"
+        assert str(config.ftp.remote_folder) == "/remote"
+        assert bool(config.ftp.use_env_credentials) is True
 
-    def test_resolve_ftp_settings_uses_env_credentials(self, tmp_path: Path):
+    def test_resolve_ftp_settings_uses_env_credentials(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("FTP_HOST", raising=False)
+        monkeypatch.delenv("FTP_USER", raising=False)
+        monkeypatch.delenv("FTP_PASS", raising=False)
         env_file = tmp_path / ".env"
-        config_file = tmp_path / "config.yaml"
+        default_file = tmp_path / "config.default.yaml"
+        config_file = tmp_path / "config.test.yaml"
         env_file.write_text(
             "FTP_HOST=env.example\n"
             "FTP_USER=env-user\n"
-            "FTP_PASS=env-pass\n"
-            "PIC_DEST=/photos\n",
+            "FTP_PASS=env-pass\n",
             encoding="utf-8",
         )
+        default_file.write_text("", encoding="utf-8")
         config_file.write_text(
+            "storage:\n"
+            "  source_folder: /src\n"
+            "  destination_folder: /dst\n"
             "ftp:\n"
-            "  local_folder: ${env:PIC_DEST}\n"
+            "  source_folder: /photos\n"
             "  remote_folder: /remote\n"
             "  use_env_credentials: true\n",
             encoding="utf-8",
@@ -663,10 +883,10 @@ class TestFtpUpload:
             password=None,
             remote_root=None,
             port=None,
-            env_file=str(env_file),
             config=str(config_file),
         )
 
+        load_dotenv_into_environ(env_file)
         settings = resolve_ftp_settings(args)
 
         assert settings["host"] == "env.example"
@@ -675,16 +895,12 @@ class TestFtpUpload:
         assert settings["source_root"] == Path("/photos")
         assert settings["remote_root"] == "/remote"
 
-    def test_resolve_env_placeholders_uses_dotenv_values(self):
-        value = resolve_env_placeholders("${env:PIC_DEST}", {"PIC_DEST": "/organized"})
-        assert value == "/organized"
-
     def test_normalize_ftp_host_strips_scheme(self):
         assert normalize_ftp_host("ftp://192.168.0.1") == "192.168.0.1"
         assert normalize_ftp_host("192.168.0.1") == "192.168.0.1"
 
     def test_upload_moves_file_to_trash(self, tmp_path: Path):
-        src_root = tmp_path / "cloud_ready"
+        src_root = tmp_path / "organized"
         trash_root = tmp_path / "ftp_trash"
         image = src_root / "2024" / "07" / "04" / "images" / "shot.jpg"
         image.parent.mkdir(parents=True)
@@ -704,8 +920,34 @@ class TestFtpUpload:
         assert not image.exists()
         assert (trash_root / "2024" / "07" / "04" / "images" / "shot.jpg").exists()
 
+    def test_upload_includes_raw_and_video_files(self, tmp_path: Path):
+        src_root = tmp_path / "organized"
+        trash_root = tmp_path / "ftp_trash"
+        raw = src_root / "2024" / "07" / "04" / "raw" / "shot.CR3"
+        video = src_root / "2024" / "07" / "04" / "videos" / "clip.mp4"
+        raw.parent.mkdir(parents=True)
+        video.parent.mkdir(parents=True)
+        raw.write_bytes(b"raw")
+        video.write_bytes(b"mp4")
+        ftp = FakeFTP()
+
+        stats = upload_to_ftp(
+            source_root=src_root,
+            trash_root=trash_root,
+            ftp=ftp,
+            remote_root="/photos",
+            dry_run=False,
+        )
+
+        assert stats == {"uploaded": 2, "skipped": 0, "errors": 0}
+        assert sorted(ftp.stor_calls) == ["STOR clip.mp4", "STOR shot.CR3"]
+        assert not raw.exists()
+        assert not video.exists()
+        assert (trash_root / "2024" / "07" / "04" / "raw" / "shot.CR3").exists()
+        assert (trash_root / "2024" / "07" / "04" / "videos" / "clip.mp4").exists()
+
     def test_dry_run_does_not_move_or_upload(self, tmp_path: Path):
-        src_root = tmp_path / "cloud_ready"
+        src_root = tmp_path / "organized"
         trash_root = tmp_path / "ftp_trash"
         image = src_root / "2024" / "07" / "04" / "images" / "shot.jpg"
         image.parent.mkdir(parents=True)

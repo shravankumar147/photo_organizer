@@ -62,18 +62,37 @@ class Organizer:
     # ------------------------------------------------------------------
 
     def process(self, src_path: Path) -> ProcessResult:
+        return self.process_with_details(src_path)["status"]
+
+    def process_with_details(self, src_path: Path) -> dict[str, str | None]:
         """Extract metadata, decide destination, move file."""
         log.info("Processing: %s", src_path)
 
         meta = self._extractor.extract(src_path)
         if meta is None:
             log.error("Skipping (no date): %s", src_path)
-            return "errors"
+            return {
+                "status": "errors",
+                "source": str(src_path),
+                "target": None,
+                "bucket": None,
+                "date": None,
+                "date_source": None,
+                "message": "no_date",
+            }
 
         bucket = media_bucket_for_path(src_path)
         if bucket is None:
             log.error("Skipping (unsupported type): %s", src_path)
-            return "errors"
+            return {
+                "status": "errors",
+                "source": str(src_path),
+                "target": None,
+                "bucket": None,
+                "date": meta.date.isoformat(),
+                "date_source": meta.date_source,
+                "message": "unsupported_type",
+            }
 
         log.info("  Bucket : %s", bucket)
         log.info("  Date   : %s  [source: %s]", meta.date.date(), meta.date_source)
@@ -85,9 +104,17 @@ class Organizer:
 
         if self.config.dry_run:
             log.info("  [dry-run] Would move → %s", dst_path)
-            return "processed"
+            return {
+                "status": "processed",
+                "source": str(src_path),
+                "target": str(dst_path),
+                "bucket": bucket,
+                "date": meta.date.isoformat(),
+                "date_source": meta.date_source,
+                "message": "dry_run",
+            }
 
-        return self._move(src_path, dst_dir, dst_path)
+        return self._move(src_path, dst_dir, dst_path, meta, bucket)
 
     # ------------------------------------------------------------------
     # Destination resolution
@@ -138,25 +165,64 @@ class Organizer:
     # File I/O
     # ------------------------------------------------------------------
 
-    def _move(self, src: Path, dst_dir: Path, dst: Path) -> ProcessResult:
+    def _move(
+        self,
+        src: Path,
+        dst_dir: Path,
+        dst: Path,
+        meta: ImageMetadata,
+        bucket: str,
+    ) -> dict[str, str]:
         # Check whether resolve decided this is a true duplicate
         if dst.exists() and self.config.hash_duplicates and self._same_content(src, dst):
             try:
                 src.unlink()
             except OSError as exc:
                 log.error("  [error] Failed to remove duplicate %s: %s", src, exc)
-                return "errors"
+                return {
+                    "status": "errors",
+                    "source": str(src),
+                    "target": str(dst),
+                    "bucket": bucket,
+                    "date": meta.date.isoformat(),
+                    "date_source": meta.date_source,
+                    "message": f"duplicate_remove_failed:{exc}",
+                }
             log.info("  [skip] Duplicate content already organised; removed source.")
-            return "skipped"
+            return {
+                "status": "skipped",
+                "source": str(src),
+                "target": str(dst),
+                "bucket": bucket,
+                "date": meta.date.isoformat(),
+                "date_source": meta.date_source,
+                "message": "duplicate_removed",
+            }
 
         try:
             dst_dir.mkdir(parents=True, exist_ok=True)
             shutil.move(str(src), str(dst))
             log.info("  [ok] Moved → %s", dst)
-            return "processed"
+            return {
+                "status": "processed",
+                "source": str(src),
+                "target": str(dst),
+                "bucket": bucket,
+                "date": meta.date.isoformat(),
+                "date_source": meta.date_source,
+                "message": "moved",
+            }
         except OSError as exc:
             log.error("  [error] Failed to move %s → %s: %s", src, dst, exc)
-            return "errors"
+            return {
+                "status": "errors",
+                "source": str(src),
+                "target": str(dst),
+                "bucket": bucket,
+                "date": meta.date.isoformat(),
+                "date_source": meta.date_source,
+                "message": f"move_failed:{exc}",
+            }
 
     # ------------------------------------------------------------------
     # Hashing (bonus deduplication)

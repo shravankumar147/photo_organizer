@@ -15,3 +15,5 @@ config.yaml
 *.csr
 credentials.json
 *.log
+test_images/
+test_output/

@@ -23,7 +23,10 @@ cloud:
 ftp:
   enabled: false
   use_env_credentials: true
+  host: "${oc.env:FTP_HOST,''}"
+  user: "${oc.env:FTP_USER,''}"
+  password: "${oc.env:FTP_PASS,''}"
   source_folder: "/Users/shravan/Documents/github/photo_organizer/test_output/organized"
-  remote_folder: "/path/on/ftp/server"
+  remote_folder: "${oc.env:FTP_REMOTE_ROOT,'/G/ftp_uploads'}"
   trash_folder: "/Users/shravan/Documents/github/photo_organizer/test_output/ftp_trash"
-  port: 21
+  port: "${oc.env:FTP_PORT,21}"

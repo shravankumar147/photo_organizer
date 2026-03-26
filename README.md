@@ -20,21 +20,24 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt          # runtime
 pip install pytest pytest-cov            # testing (optional)
 
-# 4. Run
-python -m photo_organizer --src /Volumes/SD --dst ~/Pictures/Organised
+# 4. Run against the card defaults from config.default.yaml
+python -m photo_organizer
 
-# Dry run (no files copied)
-python -m photo_organizer --src ~/Raw --dst ~/Sorted --dry-run
+# Run locally against test media from config.test.yaml
+python -m photo_organizer --config config.test.yaml
+
+# Dry run (no files moved)
+python -m photo_organizer --config config.test.yaml --dry-run
 
 # Verbose (DEBUG logs)
-python -m photo_organizer --src ~/Raw --dst ~/Sorted --verbose
+python -m photo_organizer --config config.test.yaml --verbose
 ```
 
 Or install as a CLI tool:
 
 ```bash
 pip install -e .
-photo-organizer --src ~/Raw --dst ~/Sorted
+photo-organizer
 ```
 
 ---
@@ -43,10 +46,69 @@ photo-organizer --src ~/Raw --dst ~/Sorted
 
 | Flag | Required | Default | Description |
 |---|---|---|---|
-| `--src PATH` | ✓ | — | Source directory (scanned recursively) |
-| `--dst PATH` | ✓ | — | Destination root (`YYYY/MM/DD/` created here) |
+| `--src PATH` |  | from config | Source directory (scanned recursively) |
+| `--dst PATH` |  | from config | Destination root (`YYYY/MM/DD/` created here) |
 | `--dry-run` | | false | Simulate; no files are written |
 | `--verbose` | | false | DEBUG-level logging |
+| `--config PATH` | | `config.default.yaml` | Alternate config file such as `config.test.yaml` |
+
+## Configuration
+
+Paths live in YAML config files, not in `.env`.
+
+- `config.default.yaml`: card / production defaults
+- `config.test.yaml`: local test media defaults
+- `.env`: sensitive FTP credentials only
+- `audit.folder`: where JSON run manifests are written
+
+Typical usage:
+
+```bash
+# Card
+python -m photo_organizer
+python copy_media_for_cloud.py
+python network_backup.py
+python network_backup.py --prune-source
+# Fallback only when the mounted share is unavailable
+python ftp_upload.py
+
+# Local test media
+python -m photo_organizer --config config.test.yaml
+python copy_media_for_cloud.py --config config.test.yaml
+python network_backup.py --config config.test.yaml
+python network_backup.py --config config.test.yaml --prune-source
+# Fallback only when the mounted share is unavailable
+python ftp_upload.py --config config.test.yaml
+```
+
+One-command workflow:
+
+```bash
+python run_all.py --config config.test.yaml
+python run_all.py --config config.test.yaml --prune-source
+python run_all.py --config config.test.yaml --prune-source --ftp-fallback
+```
+
+`run_all.py` runs:
+
+1. organize
+2. cloud copy
+3. network backup
+
+If `--ftp-fallback` is passed, FTP upload runs only when the network backup step fails.
+
+Recommended order:
+
+1. `python -m photo_organizer --config config.test.yaml`
+2. `python copy_media_for_cloud.py --config config.test.yaml`
+3. `python network_backup.py --config config.test.yaml`
+4. `python ftp_upload.py --config config.test.yaml` only if the network backup path is unavailable
+
+`copy_media_for_cloud.py` copies cloud-friendly `images/` and `videos/`. It excludes RAW files.
+
+`network_backup.py` and `ftp_upload.py` back up from `organized/`. FTP moves successfully uploaded files into `ftp_trash/`.
+
+`network_backup.py` is non-destructive by default. If you want the mounted share to become the source of truth after a verified backup, run `network_backup.py --prune-source`. That moves source files into a local `network_backup_trash/` directory only after matching destination content is confirmed, then removes empty source directories. This gives you a short retention window before permanent deletion.
 
 ---
 

@@ -15,10 +15,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from photo_organizer.audit import RunAudit
 from photo_organizer.cli import build_parser
+from photo_organizer.config import load_settings, to_path
 from photo_organizer.organizer import Organizer, OrganizerConfig
 from photo_organizer.scanner import DEFAULT_EXTENSIONS, Scanner
 from photo_organizer.utils import configure_logging, print_summary
+
+MANAGED_DIRECTORY_NAMES = frozenset(
+    {"organized", "cloud_ready", "ftp_trash", "network_backup_trash"}
+)
+IGNORABLE_EMPTY_DIR_FILES = frozenset({".DS_Store"})
 
 
 @dataclass
@@ -40,7 +47,7 @@ class OrganizeRequest:
     )
 
 
-def run(request: OrganizeRequest) -> dict:
+def run(request: OrganizeRequest, audit: RunAudit | None = None) -> dict:
     """
     Execute the full organise pipeline.
 
@@ -55,10 +62,12 @@ def run(request: OrganizeRequest) -> dict:
     log.info("Destination : %s", request.dst)
     log.info("Dry-run     : %s", request.dry_run)
 
+    excluded_roots = managed_roots(request.src, request.dst)
+
     scanner = Scanner(
         root=request.src,
         extensions=request.extensions,
-        excluded_roots=(request.dst,),
+        excluded_roots=excluded_roots,
     )
     config = OrganizerConfig(
         dst=request.dst,
@@ -69,19 +78,30 @@ def run(request: OrganizeRequest) -> dict:
     stats = {"processed": 0, "skipped": 0, "errors": 0}
 
     for media_path in scanner.scan():
-        result = organizer.process(media_path)
+        detail = organizer.process_with_details(media_path)
+        result = str(detail["status"])
         stats[result] += 1
+        if audit is not None:
+            audit.record(**detail)
 
     if not request.dry_run:
         removed_dirs = remove_empty_directories(
             root=request.src,
-            excluded_roots=(request.dst,),
+            excluded_roots=excluded_roots,
         )
         log.info("Removed %d empty directorie(s).", removed_dirs)
 
     stats["elapsed_seconds"] = time.perf_counter() - started_at
 
     return stats
+
+
+def managed_roots(src: Path, dst: Path) -> tuple[Path, ...]:
+    roots = {dst.resolve(strict=False)}
+    for name in MANAGED_DIRECTORY_NAMES:
+        candidate = (src / name).resolve(strict=False)
+        roots.add(candidate)
+    return tuple(sorted(roots))
 
 
 def remove_empty_directories(root: Path, excluded_roots: tuple[Path, ...] = ()) -> int:
@@ -102,8 +122,30 @@ def remove_empty_directories(root: Path, excluded_roots: tuple[Path, ...] = ()) 
             continue
 
         try:
-            next(directory.iterdir())
-        except StopIteration:
+            children = list(directory.iterdir())
+        except OSError:
+            continue
+
+        removable_files = [
+            child
+            for child in children
+            if child.is_file() and (child.name in IGNORABLE_EMPTY_DIR_FILES or child.name.startswith("._"))
+        ]
+        remaining_children = [child for child in children if child not in removable_files]
+
+        if remaining_children:
+            continue
+
+        for removable in removable_files:
+            try:
+                removable.unlink()
+            except OSError:
+                remaining_children.append(removable)
+
+        if remaining_children:
+            continue
+
+        try:
             directory.rmdir()
             removed += 1
         except OSError:
@@ -115,10 +157,13 @@ def remove_empty_directories(root: Path, excluded_roots: tuple[Path, ...] = ()) 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    settings = load_settings(args.config)
 
     request = OrganizeRequest(
-        src=Path(args.src),
-        dst=Path(args.dst) if args.dst else Path(args.src) / "organized",
+        src=Path(args.src) if args.src else to_path(settings.storage.source_folder),
+        dst=Path(args.dst)
+        if args.dst
+        else to_path(settings.storage.destination_folder),
         dry_run=args.dry_run,
         verbose=args.verbose,
     )
@@ -127,8 +172,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"[error] Source directory does not exist: {request.src}", file=sys.stderr)
         return 1
 
-    stats = run(request)
+    audit = RunAudit(
+        command="organize",
+        folder=to_path(settings.audit.folder),
+        source_root=request.src,
+        destination_root=request.dst,
+        config_path=args.config or "config.default.yaml",
+        metadata={"dry_run": request.dry_run},
+    )
+    stats = run(request, audit=audit)
+    manifest_path = audit.write(stats)
     print_summary(stats)
+    print(f"Manifest            : {manifest_path}")
     return 0 if stats["errors"] == 0 else 1
 
 

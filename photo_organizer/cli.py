@@ -9,8 +9,6 @@ from __future__ import annotations
 
 import argparse
 
-DEFAULT_SRC = "/Volumes/EOS_DIGITAL/DCIM/100CANON"
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -31,7 +29,6 @@ examples:
     parser.add_argument(
         "--src",
         metavar="PATH",
-        default=DEFAULT_SRC,
         help="Source directory to scan recursively.",
     )
     parser.add_argument(
@@ -50,6 +47,11 @@ examples:
         action="store_true",
         default=False,
         help="Enable DEBUG-level logging.",
+    )
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help="Optional config file. Defaults to config.default.yaml. Use config.test.yaml for local test runs.",
     )
 
     return parser
