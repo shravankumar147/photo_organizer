@@ -17,3 +17,4 @@ credentials.json
 *.log
 test_images/
 test_output/
+run_logs/
