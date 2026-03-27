@@ -3,11 +3,22 @@
 ## Current Status
 
 - Branch: `main`
-- Latest local commit: working tree with OmegaConf config refactor
-- Latest remote commit: `31f9bed` `bucket media files by type`
-- Test status: `.venv/bin/pytest -q` passing (`53 passed`)
+- Latest local commit: `e641667` `add rich photo pipeline wrapper`
+- Latest remote commit: `e641667` `add rich photo pipeline wrapper`
+- Test status: `python3 -m py_compile photo_pipeline.py` passing
 
 ## Progress Log
+
+### 2026-03-27
+
+- Added `photo_pipeline.py` as a Typer-based macOS workflow wrapper for ingest, backup, clean, and full pipeline runs.
+- Made the wrapper use the current interpreter and repo-relative paths instead of a hardcoded checkout path and venv binary.
+- Added NAS mount discovery so the wrapper can detect realistic mounted volume layouts before running the backup step.
+- Added Rich-based terminal status/progress output for mount waits and pipeline step execution.
+- Updated the NAS share configuration in `photo_pipeline.py` to use `Canon_EOS_M50`.
+- Added `rich` to runtime dependencies in `requirements.txt` and `setup.py`.
+- Ignored generated `run_logs/` artifacts in `.gitignore`.
+- Pushed the wrapper and ignore updates to `origin/main`.
 
 ### 2026-03-21
 
@@ -60,5 +71,5 @@
 
 ## Next Step
 
-- For the real card workflow, run: `python -m photo_organizer`, `python copy_media_for_cloud.py`, and `python network_backup.py`.
+- For the real card workflow, either run `python -m photo_organizer`, `python copy_media_for_cloud.py`, and `python network_backup.py`, or use `python photo_pipeline.py all` on macOS once the NAS share is mounted correctly.
 - For local testing, run the same commands with `--config config.test.yaml`, and use `python ftp_upload.py --config config.test.yaml` only as fallback when the mounted share is unavailable.
