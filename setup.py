@@ -6,10 +6,10 @@ setup(
     description="EXIF-aware photo organiser CLI — core engine for macOS SwiftUI app",
     python_requires=">=3.10",
     packages=find_packages(exclude=["tests*"]),
-    install_requires=["Pillow>=10.0.0", "omegaconf>=2.3.0"],
+    install_requires=["Pillow>=10.0.0", "omegaconf>=2.3.0", "rich>=13.7.0"],
     extras_require={
         "dev": ["pytest>=8.0.0", "pytest-cov>=5.0.0"],
-        "progress": ["tqdm>=4.66.0"],
+        "progress": ["rich>=13.7.0"],
         "api": ["fastapi>=0.111.0", "uvicorn>=0.29.0"],
     },
     entry_points={

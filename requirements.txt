@@ -3,6 +3,7 @@
 # Core (image metadata)
 Pillow>=10.0.0
 omegaconf>=2.3.0
+rich>=13.7.0
 
 # Dev / testing
 pytest>=8.0.0
